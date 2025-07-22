@@ -1,56 +1,92 @@
 #!name = Emby Filter
 #!desc = Emby服务器分流。
 #!author = RuCu6[https://github.com/RuCu6]
-#!homepage = https://github.com/bemarkt/scripts/blob/master/provider/Loon/README.md
 #!icon = https://raw.githubusercontent.com/bemarkt/Scripts/master/provider/Loon/Resources/Icons/app/emby.png
-#!date = 2024-10-03 02:20
+#!date = 2025-07-22 17:16
 
 [Rule]
 # 江湖
-DOMAIN-SUFFIX, reddust.link, Emby
+DOMAIN-SUFFIX, reddust.link, emby策略
 
 # 垃圾影音
-DOMAIN, cf.emby.moe, Emby
-DOMAIN, cf.xmsl.org, Emby
+DOMAIN, cf.emby.moe, emby策略
+DOMAIN, cf.xmsl.org, emby策略
 
 # 普拉斯影业
 DOMAIN, emby-best.xeton.dev, DIRECT
-DOMAIN, emby-cf.plusmedia.site, Emby
-DOMAIN, emby.plusmedia.site, Emby
-DOMAIN, emby.xeton.dev, Emby
-DOMAIN, jellyfin.xeton.dev, Emby
-DOMAIN, movie.xeton.dev, Emby
-DOMAIN, servers.xeton.dev, Emby
+DOMAIN, emby-cf.plusmedia.site, emby策略
+DOMAIN, emby.plusmedia.site, emby策略
+DOMAIN, emby.xeton.dev, emby策略
+DOMAIN, jellyfin.xeton.dev, emby策略
+DOMAIN, movie.xeton.dev, emby策略
+DOMAIN, servers.xeton.dev, emby策略
 
 # 叔服
-DOMAIN, emby3.mcjoker.xyz, Emby
+DOMAIN, emby3.mcjoker.xyz, emby策略
 DOMAIN, jz.mcjoker.xyz, DIRECT
 
 # 私房菜
-DOMAIN, notnetflix.cos.cat, Emby
+DOMAIN, notnetflix.cos.cat, emby策略
 
 # Lend
-DOMAIN, emby.lcloud.wiki, Emby
+DOMAIN, emby.lcloud.wiki, emby策略
 
 # Marmot
-DOMAIN, v.20120714.xyz, Emby
+DOMAIN, v.20120714.xyz, emby策略
 
 # MisakaF
 DOMAIN, cdn.misakaf.org, DIRECT
-DOMAIN, emby.misakaf.org, Emby
-DOMAIN, push-kr.misakaf.org, Emby
-IP-CIDR, 102.223.180.108/32, Emby, no-resolve
+DOMAIN, emby.misakaf.org, emby策略
+DOMAIN, push-kr.misakaf.org, emby策略
+IP-CIDR, 102.223.180.108/32, emby策略, no-resolve
 
 # NMEmby
-DOMAIN, film.ohhhh.org, Emby
+DOMAIN, film.ohhhh.org, emby策略
 
 # Temby
-DOMAIN, temby.285286.xyz, Emby
-DOMAIN, temby4837.285286.xyz, Emby
+DOMAIN, temby.285286.xyz, emby策略
+DOMAIN, temby4837.285286.xyz, emby策略
 
 # TreeDiagram
-DOMAIN, 789.123456.al, Emby
+DOMAIN, 789.123456.al, emby策略
 
 # ntRRR
-DOMAIN, stream.ntrrr.top, Emby
-DOMAIN, stream.synn.cc, Emby
+DOMAIN, stream.ntrrr.top, emby策略
+DOMAIN, stream.synn.cc, emby策略
+
+#105 emby
+DOMAIN,ciallo.party,emby策略
+#河海 emby
+DOMAIN,emby.hohai.eu.org,emby策略
+#zn emby
+DOMAIN,emby.zn.al,emby策略
+#Hka emby
+DOMAIN,hka-emby.aliz.work,emby策略
+#star emby
+DOMAIN,https://fast-1.staryuki.me.kiven.cc,emby策略
+DOMAIN,https://fast-v6.staryuki.me.kiven.cc,DIRECT
+DOMAIN,c1.staryuki.me,DIRECT
+DOMAIN,c2.staryuki.me,DIRECT
+DOMAIN-SUFFIX,staryuki.me,emby策略
+#Sntp深海 emby
+DOMAIN,lite.cn2gias.uk,emby策略
+#zox emby
+DOMAIN,zoxfree.3767483.xyz,emby策略
+#AniHub emby
+DOMAIN,ani.cappuccino.moe,DIRECT
+#土匪emby
+DOMAIN,tufei.de,emby策略
+#nya emby
+DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
+#UHD emby
+DOMAIN,v1.uhdnow.com,emby策略
+#币安
+DOMAIN,www.binance.com,DIRECT
+#音海拾贝
+DOMAIN,music.makifx.com,DIRECT
+#Youno emby
+# cf线路走代理
+DOMAIN,emby.younoyes.com,emby策略
+# 直连域名
+DOMAIN-SUFFIX,younoyes.com,DIRECT
+
