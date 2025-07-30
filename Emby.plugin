@@ -82,11 +82,21 @@ DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
 DOMAIN,v1.uhdnow.com,emby策略
 #币安
 DOMAIN,www.binance.com,DIRECT
-#音海拾贝
-DOMAIN,music.makifx.com,DIRECT
 #Youno emby
 # cf线路走代理
 DOMAIN,emby.younoyes.com,emby策略
 # 直连域名
 DOMAIN-SUFFIX,younoyes.com,DIRECT
+#Douban
+DOMAIN,onatoshi.114514.quest,DIRECT
+#音海拾贝
+DOMAIN,yinhai.aiinyue.com,DIRECT
+#稳健
+DOMAIN,lrc.811861.xyz,DIRECT
+DOMAIN,music.wenjian.de,DIRECT
+DOMAIN,emby.wenjian.de,Emby策略
+#shrek
+DOMAIN,public.shrekmedia.org,DIRECT
+#非越
+DOMAIN-SUFFIX,sfcj.org,Emby策略
 
