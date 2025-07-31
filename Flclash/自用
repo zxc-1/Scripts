@@ -1,0 +1,202 @@
+######### 锚点 start #######
+# 策略组相关
+pr: &pr {type: select, proxies: [Test, HK, TW, JP, SG, US,DIRECT]}
+
+#这里是订阅更新和延迟测试相关的
+p: &p {type: http, interval: 3600, udp: true, health-check: {enable: true, url: https://www.google.com/generate_204, interval: 300}}
+
+######### 锚点 end #######
+
+# url 里填写自己的订阅,名称不能重复
+proxy-providers:
+
+  Flower:
+    <<: *p
+    url: "https://api-huacloud.net/sub?target=clash&insert=true&emoji=true&udp=true&clash.doh=true&new_name=true&filename=Flower_SS.yaml&url=https%3A%2F%2Fapi.xmancdn.net%2Fosubscribe.php%3Fsid%3D193589%26token%3DDMx3dzVZEFDh%26sip002%3D1"
+    proxy: DIRECT
+    #override:
+      #additional-prefix: "Flower"
+
+ipv6: true
+allow-lan: true
+mixed-port: 7890
+unified-delay: false
+tcp-concurrent: true
+external-controller: 127.0.0.1:9090
+external-ui: ui
+external-ui-url: "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
+geodata-mode: true
+geox-url:
+  geoip: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoIP.dat"
+  geosite: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
+  mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+  asn: "https://github.com/xishang0128/geoip/releases/download/latest/GeoLite2-ASN.mmdb"
+find-process-mode: strict
+global-client-fingerprint: chrome
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+sniffer:
+  enable: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - "Mijia Cloud"
+tun:
+  enable: true
+  stack: mixed
+  dns-hijack:
+    - "any:53"
+  auto-route: true
+  auto-detect-interface: true
+
+hosts:
+  "mtalk.google.com": 142.250.157.188
+  "alt1-mtalk.google.com": 142.250.141.188
+  "alt2-mtalk.google.com": 142.250.115.188
+  "alt3-mtalk.google.com": 64.233.171.188
+  "alt4-mtalk.google.com": 173.194.202.188
+  "alt5-mtalk.google.com": 142.250.141.188
+  "alt6-mtalk.google.com": 142.250.115.188
+  "alt7-mtalk.google.com": 142.250.141.188
+  "alt8-mtalk.google.com": 142.250.152.188
+
+dns:
+  enable: true
+  ipv6: true
+  respect-rules: true
+  enhanced-mode: fake-ip
+  fake-ip-filter:
+    - "*"
+    - "+.lan"
+    - "+.local"
+    - "+.market.xiaomi.com"
+    - "alt*-mtalk.google.com"
+    - "mtalk.google.com"
+
+  nameserver:
+    - https://120.53.53.53/dns-query
+    - https://223.5.5.5/dns-query
+  proxy-server-nameserver:
+    - https://120.53.53.53/dns-query
+    - https://223.5.5.5/dns-query
+  nameserver-policy:
+    "rule-set:cn,private":
+      - https://120.53.53.53/dns-query
+      - https://223.5.5.5/dns-query
+    "rule-set:geolocation-!cn":
+      - "https://dns.cloudflare.com/dns-query"
+      - "https://dns.google/dns-query"
+
+proxy-groups:
+  - {name: Proxies, type: select, Proxies: [HK, TW, JP, SG, US, Test], icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Rocket.png}
+  - {name: fallback, type: fallback, use: [Flower], filter: "(?i)港|hk|hongkong|hong kong", url: https://www.gstatic.com/generate_204, interval: 300, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available.png}
+  - {name: Flower手动, type: select, use: [Flower], icon: https://raw.githubusercontent.com/lige47/QuanX-icon-rule/refs/heads/main/icon/shouhou(4).png}
+  - {name: Emby公益服, type: select, proxies: [Proxies, DIRECT], include-all-providers: true, filter: "^(?=.*(Emby专用|实验性|0.2x|EMBY|US))(?!.*(SG|KR|TW|新加坡|香港)).*$", icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Emby.png}
+  - {name: Google, <<: *pr, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png}
+  - {name: Telegram, <<: *pr, icon: https://fastly.jsdelivr.net/gh/shindgewongxj/WHATSINStash@master/icon/telegram.png}
+  - {name: Twitter, <<: *pr, icon: https://fastly.jsdelivr.net/gh/shindgewongxj/WHATSINStash@master/icon/x.png}
+  - {name: Tiktok, <<: *pr, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/TikTok.png}
+  - {name: YouTube, <<: *pr, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png}
+  - {name: NETFLIX, <<: *pr, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Netflix.png}
+  - {name: Disney, <<: *pr, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Disney.png}
+  - {name: Microsoft, <<: *pr, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Microsoft.png}
+  - {name: Spotify, <<: *pr, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png}
+  - {name: Github, <<: *pr, icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png}
+  - {name: OpenAI, <<: *pr, icon: https://fastly.jsdelivr.net/gh/shindgewongxj/WHATSINStash@master/icon/openai.png}
+
+  #分隔,下面是地区分组
+  - {name: HK, type: select , include-all-providers: true, filter: "(?i)港|hk|hongkong|hong kong", icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Hong_Kong.png}
+  - {name: TW, type: select , include-all-providers: true, filter: "(?i)台|tw|taiwan", icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/China.png}
+  - {name: JP, type: select , include-all-providers: true, filter: "(?i)日|jp|japan", icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Japan.png}
+  - {name: US, type: select , include-all-providers: true, filter: "(?i)美|us|unitedstates|united states", icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/United_States.png}
+  - {name: SG, type: select , include-all-providers: true, filter: "(?i)(新|sg|singapore)", icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Singapore.png}
+  - {name: Test, type: select , include-all-providers: true, filter: "(?i)(实验性)", icon: https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Singapore.png}
+
+rules:
+  - GEOIP,lan,DIRECT,no-resolve
+  - RULE-SET,github,Github
+  - IP-ASN,62041,Telegram
+  - IP-ASN,62014,Telegram
+  - IP-ASN,59930,Telegram
+  - RULE-SET,telegram,Telegram
+  - RULE-SET,Microsoft,Microsoft
+  - RULE-SET,twitter,Twitter
+  - RULE-SET,youtube,YouTube
+  - RULE-SET,GoogleFCM,Proxies
+  - RULE-SET,google,Google
+  - RULE-SET,netflix,NETFLIX
+  - RULE-SET,Disney,Disney
+  - RULE-SET,spotify,Spotify
+  - RULE-SET,Tiktok,Tiktok
+  - RULE-SET,OpenAI,OpenAI
+  - GEOIP,google,Google
+  - GEOIP,telegram,Telegram
+  - GEOIP,twitter,Twitter
+  - GEOIP,NETFLIX,NETFLIX
+  - RULE-SET,cn,DIRECT
+  - GEOSITE,CN,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,Proxies
+rule-anchor:
+  ip: &ip {type: http, interval: 86400, behavior: ipcidr, format: yaml}
+  domain: &domain {type: http, interval: 86400, behavior: domain, format: yaml}
+  classical: &classical {type: http, interval: 86400, behavior: classical, format: yaml}
+rule-providers:
+  private:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/private.yaml"
+  cn:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.yaml"
+  github:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/github.yaml"
+  twitter:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.yaml"
+  youtube:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.yaml"
+  GoogleFCM:
+    <<: *classical
+    url: "https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/GoogleFCM/GoogleFCM.yaml"
+    path: ./RuleSet/GoogleFCM.yaml
+  google:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.yaml"
+  telegram:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.yaml"
+  netflix:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/netflix.yaml"
+  spotify:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.yaml"
+  Tiktok:
+    <<: *domain
+    url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/tiktok.yaml"
+  Disney:
+    <<: *domain
+    url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/disney.yaml"
+  Microsoft:
+    <<: *domain
+    url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/microsoft.yaml"
+  Emby:
+    <<: *domain
+    url: "https://edec7dc6.cf-workers-2u5.pages.dev/zxc-1/Scripts/refs/heads/main/Flclash/Emby.yaml?token=emby"
+  OpenAI:
+    <<: *domain
+    url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/openai.yaml"
+  geolocation-!cn:
+    <<: *domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/geolocation-!cn.yaml"
