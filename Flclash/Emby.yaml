@@ -1,0 +1,48 @@
+payload:
+
+#105 emby
+    - +.ciallo.party
+#河海 emby
+    - +.emby.hohai.eu.org
+#zn emby
+    - +.emby.zn.al
+#Hka emby
+    - +.hka-emby.aliz.work
+#star emby
+    - +.https://fast-1.staryuki.me.kiven.cc
+    - +.https://fast-v6.staryuki.me.kiven.cc
+    - +.c1.staryuki.me
+    - +.c2.staryuki.me
+    - +.staryuki.me
+#Sntp深海 emby
+    - +.lite.cn2gias.uk
+#zox emby
+    - +.zoxfree.3767483.xyz
+#AniHub emby
+    - +.ani.cappuccino.moe
+#土匪emby
+    - +.tufei.de
+#nya emby
+    - +.ap-cn01.emby.bangumi.ca
+#UHD emby
+    - +.v1.uhdnow.com
+#Youno emby
+# cf线路走代理
+    - +.emby.younoyes.com
+# 直连域名
+    - +.younoyes.com
+#Douban
+    - +.onatoshi.114514.quest
+#音海拾贝
+    - +.yinhai.aiinyue.com
+#稳健
+    - +.lrc.811861.xyz
+    - +.music.wenjian.de
+    - +.emby.wenjian.de
+#shrek
+    - +.public.shrekmedia.org
+#非越
+    - +.sfcj.org
+
+
+
