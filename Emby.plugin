@@ -94,9 +94,9 @@ DOMAIN,yinhai.aiinyue.com,DIRECT
 #稳健
 DOMAIN,lrc.xms.mx,DIRECT
 DOMAIN,music.wenjian.de,DIRECT
-DOMAIN,emby.wenjian.de,Emby策略
+DOMAIN,emby.wenjian.de,emby策略
 #shrek
 DOMAIN,public.shrekmedia.org,DIRECT
 #非越
-DOMAIN-SUFFIX,sfcj.org,Emby策略
+DOMAIN-SUFFIX,sfcj.org,emby策略
 
