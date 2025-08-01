@@ -90,10 +90,10 @@ DOMAIN-SUFFIX,younoyes.com,DIRECT
 #Douban
 DOMAIN,onatoshi.114514.quest,DIRECT
 #音海拾贝
-DOMAIN,yinhai.aiinyue.com,自建策略
+DOMAIN,yinhai.aiinyue.com,DIRECT
 #稳健
-DOMAIN,lrc.xms.mx,自建策略
-DOMAIN,music.wenjian.de,自建策略
+DOMAIN,lrc.xms.mx,DIRECT
+DOMAIN,music.wenjian.de,DIRECT
 DOMAIN,emby.wenjian.de,Emby策略
 #shrek
 DOMAIN,public.shrekmedia.org,DIRECT
