@@ -63,7 +63,7 @@ DOMAIN,emby.zn.al,emby策略
 #Hka emby
 DOMAIN,hka-emby.aliz.work,emby策略
 #star emby
-DOMAIN,https://fast-1.staryuki.me.kiven.cc,emby策略
+DOMAIN,https://fast-1.staryuki.me.kiven.cc,DIRECT
 DOMAIN,https://fast-v6.staryuki.me.kiven.cc,DIRECT
 DOMAIN,c1.staryuki.me,DIRECT
 DOMAIN,c2.staryuki.me,DIRECT
