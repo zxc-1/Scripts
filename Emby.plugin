@@ -28,10 +28,8 @@ DOMAIN,zoxfree.3767483.xyz,emby策略
 DOMAIN,ani.cappuccino.moe,DIRECT
 #nya emby
 DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
-#UHD emby
-DOMAIN,v1.uhdnow.com,emby策略
-#币安
-DOMAIN,www.binance.com,DIRECT
+
+
 #Youno emby
 # cf线路走代理
 DOMAIN,emby.younoyes.com,emby策略
@@ -65,7 +63,12 @@ DOMAIN,cd-2.frp.one:18096,DIRECT
 #PlayZ
 DOMAIN,playz.mjji.de,emby策略
 DOMAIN,zhousanwan.com,DIRECT
-DOMAIN,appapi.bitget.com,日本策略
+
 #见手青
 DOMAIN,jsq.vban.xyz,DIRECT
+
+#蛋服
+DOMAIN,emby2.mjji.de,DIRECT
+DOMAIN,cloudflare.mjji.de,emby策略
+DOMAIN,de.mjji.de,emby策略
 
