@@ -8,24 +8,32 @@
 
 #105 emby
 DOMAIN,ciallo.party,emby策略
+
 #河海 emby
 DOMAIN,emby.hohai.eu.org,emby策略
+
 #zn emby
 DOMAIN,emby.zn.al,emby策略
+
 #Hka emby
 DOMAIN,hka-emby.aliz.work,emby策略
+
 #star emby
 DOMAIN,fast-1.staryuki.me.kiven.cc,DIRECT
 DOMAIN,fast-v6.staryuki.me.kiven.cc,DIRECT
 DOMAIN,c1.staryuki.me,DIRECT
 DOMAIN,c2.staryuki.me,DIRECT
 DOMAIN-SUFFIX,staryuki.me,emby策略
+
 #Sntp深海 emby
 DOMAIN,lite.cn2gias.uk,emby策略
+
 #zox emby
 DOMAIN,zoxfree.3767483.xyz,emby策略
+
 #AniHub emby
 DOMAIN,ani.cappuccino.moe,DIRECT
+
 #nya emby
 DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
 
@@ -35,23 +43,30 @@ DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
 DOMAIN,emby.younoyes.com,emby策略
 # 直连域名
 DOMAIN-SUFFIX,younoyes.com,DIRECT
+
 #Douban
 DOMAIN,onatoshi.114514.quest,DIRECT
+
 #音海拾贝
 DOMAIN,yinhai.aiinyue.com,DIRECT
+
 #稳健
 DOMAIN,yin.wenjian.de,emby策略
 DOMAIN,lrc.xms.mx,DIRECT
 DOMAIN,music.wenjian.de,DIRECT
 DOMAIN,emby.wenjian.de,emby策略
+
 #shrek
 DOMAIN,public.shrekmedia.org,DIRECT
+
 #非越
 DOMAIN-SUFFIX,sfcj.org,emby策略
 #云云
 DOMAIN,yunti.online,手动选择
+
 #Shrek
 DOMAIN,public.shrekmedia.org,emby策略
+
 #susu私服
 DOMAIN,jfus4.sususu.cf,DIRECT
 DOMAIN,jfa.sususu.cf,emby策略
@@ -60,9 +75,9 @@ DOMAIN,jf.969824.xyz,emby策略
 #星海
 DOMAIN,digimon.ink,DIRECT
 DOMAIN,cd-2.frp.one:18096,DIRECT
+
 #PlayZ
 DOMAIN,playz.mjji.de,emby策略
-DOMAIN,zhousanwan.com,DIRECT
 
 #见手青
 DOMAIN,jsq.vban.xyz,DIRECT
@@ -71,4 +86,22 @@ DOMAIN,jsq.vban.xyz,DIRECT
 DOMAIN,emby2.mjji.de,DIRECT
 DOMAIN,cloudflare.mjji.de,emby策略
 DOMAIN,de.mjji.de,emby策略
+
+
+
+
+
+
+
+
+
+########音乐服##########
+#音海拾贝
+DOMAIN,yinhai.aiinyue.com,DIRECT
+
+#稳健
+DOMAIN,yin.wenjian.de,emby策略
+
+#未响
+DOMAIN,music.mefun.org,emby策略
 
