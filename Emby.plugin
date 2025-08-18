@@ -5,54 +5,6 @@
 #!date = 2025-07-22 17:16
 
 [Rule]
-# 江湖
-DOMAIN-SUFFIX, reddust.link, emby策略
-
-# 垃圾影音
-DOMAIN, cf.emby.moe, emby策略
-DOMAIN, cf.xmsl.org, emby策略
-
-# 普拉斯影业
-DOMAIN, emby-best.xeton.dev, DIRECT
-DOMAIN, emby-cf.plusmedia.site, emby策略
-DOMAIN, emby.plusmedia.site, emby策略
-DOMAIN, emby.xeton.dev, emby策略
-DOMAIN, jellyfin.xeton.dev, emby策略
-DOMAIN, movie.xeton.dev, emby策略
-DOMAIN, servers.xeton.dev, emby策略
-
-# 叔服
-DOMAIN, emby3.mcjoker.xyz, emby策略
-DOMAIN, jz.mcjoker.xyz, DIRECT
-
-# 私房菜
-DOMAIN, notnetflix.cos.cat, emby策略
-
-# Lend
-DOMAIN, emby.lcloud.wiki, emby策略
-
-# Marmot
-DOMAIN, v.20120714.xyz, emby策略
-
-# MisakaF
-DOMAIN, cdn.misakaf.org, DIRECT
-DOMAIN, emby.misakaf.org, emby策略
-DOMAIN, push-kr.misakaf.org, emby策略
-IP-CIDR, 102.223.180.108/32, emby策略, no-resolve
-
-# NMEmby
-DOMAIN, film.ohhhh.org, emby策略
-
-# Temby
-DOMAIN, temby.285286.xyz, emby策略
-DOMAIN, temby4837.285286.xyz, emby策略
-
-# TreeDiagram
-DOMAIN, 789.123456.al, emby策略
-
-# ntRRR
-DOMAIN, stream.ntrrr.top, emby策略
-DOMAIN, stream.synn.cc, emby策略
 
 #105 emby
 DOMAIN,ciallo.party,emby策略
@@ -74,8 +26,6 @@ DOMAIN,lite.cn2gias.uk,emby策略
 DOMAIN,zoxfree.3767483.xyz,emby策略
 #AniHub emby
 DOMAIN,ani.cappuccino.moe,DIRECT
-#土匪emby
-DOMAIN,tufei.de,emby策略
 #nya emby
 DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
 #UHD emby
@@ -92,6 +42,7 @@ DOMAIN,onatoshi.114514.quest,DIRECT
 #音海拾贝
 DOMAIN,yinhai.aiinyue.com,DIRECT
 #稳健
+DOMAIN,yin.wenjian.de,emby策略
 DOMAIN,lrc.xms.mx,DIRECT
 DOMAIN,music.wenjian.de,DIRECT
 DOMAIN,emby.wenjian.de,emby策略
@@ -99,4 +50,22 @@ DOMAIN,emby.wenjian.de,emby策略
 DOMAIN,public.shrekmedia.org,DIRECT
 #非越
 DOMAIN-SUFFIX,sfcj.org,emby策略
+#云云
+DOMAIN,yunti.online,手动选择
+#Shrek
+DOMAIN,public.shrekmedia.org,emby策略
+#susu私服
+DOMAIN,jfus4.sususu.cf,DIRECT
+DOMAIN,jfa.sususu.cf,emby策略
+DOMAIN,jf.969824.xyz,emby策略
+
+#星海
+DOMAIN,digimon.ink,DIRECT
+DOMAIN,cd-2.frp.one:18096,DIRECT
+#PlayZ
+DOMAIN,playz.mjji.de,emby策略
+DOMAIN,zhousanwan.com,DIRECT
+DOMAIN,appapi.bitget.com,日本策略
+#见手青
+DOMAIN,jsq.vban.xyz,DIRECT
 
