@@ -62,7 +62,7 @@ DOMAIN,public.shrekmedia.org,DIRECT
 #非越
 DOMAIN-SUFFIX,sfcj.org,emby策略
 #云云
-DOMAIN,yunti.online,手动选择
+DOMAIN,yunti.online,Another
 
 #Shrek
 DOMAIN,public.shrekmedia.org,emby策略
@@ -87,6 +87,10 @@ DOMAIN,emby2.mjji.de,DIRECT
 DOMAIN,cloudflare.mjji.de,emby策略
 DOMAIN,de.mjji.de,emby策略
 
+#ikun服
+DOMAIN-SUFFIX,o808o.com,emby策略
+DOMAIN,v6.o808o.com,DIRECT
+DOMAIN,emby.o808o.com,DIRECT
 
 
 
@@ -101,6 +105,7 @@ DOMAIN,yinhai.aiinyue.com,DIRECT
 
 #稳健
 DOMAIN,yin.wenjian.de,emby策略
+DOMAIN,api.lrc.cx,emby策略
 
 #未响
 DOMAIN,music.mefun.org,emby策略
