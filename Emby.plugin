@@ -62,7 +62,7 @@ DOMAIN,public.shrekmedia.org,DIRECT
 #非越
 DOMAIN-SUFFIX,sfcj.org,emby策略
 #云云
-DOMAIN,yunti.online,Another
+#DOMAIN,yunti.online,Another
 
 #Shrek
 DOMAIN,public.shrekmedia.org,emby策略
