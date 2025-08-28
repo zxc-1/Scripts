@@ -57,7 +57,7 @@ DOMAIN,music.wenjian.de,DIRECT
 DOMAIN,emby.wenjian.de,emby策略
 
 #shrek
-DOMAIN,public.shrekmedia.org,DIRECT
+DOMAIN,public.shrekmedia.org,emby策略
 
 #非越
 DOMAIN-SUFFIX,sfcj.org,emby策略
