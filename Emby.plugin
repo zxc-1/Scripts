@@ -5,6 +5,9 @@
 #!date = 2025-07-22 17:16
 
 [Rule]
+#L站
+DOMAIN,dongman.theluyuan.com,DIRECT
+
 
 #105 emby
 DOMAIN,ciallo.party,emby策略
