@@ -69,8 +69,8 @@ DOMAIN,public.shrekmedia.org,emby策略
 
 #susu私服
 DOMAIN,jfus4.sususu.cf,DIRECT
-DOMAIN,jfa.sususu.cf,emby策略
-DOMAIN,jf.969824.xyz,emby策略
+DOMAIN,jfa.sususu.cf,DIRECT
+DOMAIN,jf.969824.xyz,DIRECT
 
 #星海
 DOMAIN,digimon.ink,DIRECT
