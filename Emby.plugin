@@ -2,43 +2,30 @@
 #!desc = Emby服务器分流。
 #!author = RuCu6[https://github.com/RuCu6]
 #!icon = https://raw.githubusercontent.com/bemarkt/Scripts/master/provider/Loon/Resources/Icons/app/emby.png
-#!date = 2025-07-22 17:16
+#!date = 2025-09-01
 
 [Rule]
-#L站
+#saodu-私服
+DOMAIN,saodu.work,DIRECT
+DOMAIN,saodu.asia,DIRECT
+DOMAIN,emby.saodu.work,DIRECT
+
+#L站-私服
 DOMAIN,dongman.theluyuan.com,DIRECT
 
+#susu私服
+DOMAIN,jfus4.sususu.cf,DIRECT
+DOMAIN,jfa.sususu.cf,DIRECT
+DOMAIN,jf.969824.xyz,DIRECT
 
-#105 emby
-DOMAIN,ciallo.party,emby策略
+#ruby-私服
+DOMAIN,8.217.120.32,DIRECT
+DOMAIN,emby.h88d30ac9.nyat.app,DIRECT
 
-#河海 emby
-DOMAIN,emby.hohai.eu.org,emby策略
-
-#zn emby
-DOMAIN,emby.zn.al,emby策略
-
-#Hka emby
-DOMAIN,hka-emby.aliz.work,emby策略
-
-#star emby
-DOMAIN,fast-1.staryuki.me.kiven.cc,DIRECT
-DOMAIN,fast-v6.staryuki.me.kiven.cc,DIRECT
-DOMAIN,c1.staryuki.me,DIRECT
-DOMAIN,c2.staryuki.me,DIRECT
-DOMAIN-SUFFIX,staryuki.me,emby策略
-
-#Sntp深海 emby
-DOMAIN,lite.cn2gias.uk,emby策略
-
-#zox emby
-DOMAIN,zoxfree.3767483.xyz,emby策略
-
-#AniHub emby
+#AniHub-私服
 DOMAIN,ani.cappuccino.moe,DIRECT
 
-#nya emby
-DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
+
 
 
 #Youno emby
@@ -47,11 +34,17 @@ DOMAIN,emby.younoyes.com,emby策略
 # 直连域名
 DOMAIN-SUFFIX,younoyes.com,DIRECT
 
+#zox emby
+DOMAIN,zoxfree.3767483.xyz,emby策略
+
+#Sntp深海 emby
+DOMAIN,lite.cn2gias.uk,emby策略
+
+#非越
+DOMAIN-SUFFIX,sfcj.org,emby策略
+
 #Douban
 DOMAIN,onatoshi.114514.quest,DIRECT
-
-#音海拾贝
-DOMAIN,yinhai.aiinyue.com,DIRECT
 
 #稳健
 DOMAIN,yin.wenjian.de,emby策略
@@ -59,50 +52,53 @@ DOMAIN,lrc.xms.mx,DIRECT
 DOMAIN,music.wenjian.de,DIRECT
 DOMAIN,emby.wenjian.de,emby策略
 
-#shrek
-DOMAIN,public.shrekmedia.org,emby策略
+#见手青
+DOMAIN,jsq.vban.xyz,DIRECT
 
-#非越
-DOMAIN-SUFFIX,sfcj.org,emby策略
-#云云
-#DOMAIN,yunti.online,Another
+#star emby
+DOMAIN,fast-1.staryuki.me.kiven.cc,DIRECT
+DOMAIN,fast-v6.staryuki.me.kiven.cc,DIRECT
+DOMAIN,c1.staryuki.me,DIRECT
+DOMAIN,c2.staryuki.me,DIRECT
+DOMAIN-SUFFIX,staryuki.me,emby策略
+
+#河海 emby
+DOMAIN,emby.hohai.eu.org,emby策略
 
 #Shrek
 DOMAIN,public.shrekmedia.org,emby策略
 
-#susu私服
-DOMAIN,jfus4.sususu.cf,DIRECT
-DOMAIN,jfa.sususu.cf,DIRECT
-DOMAIN,jf.969824.xyz,DIRECT
+#ME
+DOMAIN,bava.mebimmer.de,emby策略
+DOMAIN,mperformance.mebimmer.de,emby策略
 
-#星海
-DOMAIN,digimon.ink,DIRECT
-DOMAIN,cd-2.frp.one:18096,DIRECT
+#Hka emby
+DOMAIN,hka-emby.aliz.work,emby
+
+#nya emby
+DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
+
+#0 emby
+DOMAIN,ciallo.party,emby策略
 
 #PlayZ
 DOMAIN,playz.mjji.de,emby策略
 
-#见手青
-DOMAIN,jsq.vban.xyz,DIRECT
+#探花
+DOMAIN,pri.tanhuatv.site,emby策略
 
-#蛋服
-DOMAIN,emby2.mjji.de,DIRECT
-DOMAIN,cloudflare.mjji.de,emby策略
-DOMAIN,de.mjji.de,emby策略
+#zn emby
+DOMAIN,emby.zn.al,emby策略
 
-#ikun服
-DOMAIN-SUFFIX,o808o.com,emby策略
-DOMAIN,v6.o808o.com,DIRECT
-DOMAIN,emby.o808o.com,DIRECT
+#云云-机场服
+#DOMAIN,yunti.online,Another
 
 
 
 
 
 
-
-
-########音乐服##########
+##########音乐服##########
 #音海拾贝
 DOMAIN,yinhai.aiinyue.com,DIRECT
 
