@@ -81,14 +81,19 @@ DOMAIN,ap-cn01.emby.bangumi.ca,emby策略
 #0 emby
 DOMAIN,ciallo.party,emby策略
 
+#zn emby
+DOMAIN,emby.zn.al,emby策略
+
 #PlayZ
 DOMAIN,playz.mjji.de,emby策略
 
 #探花
 DOMAIN,pri.tanhuatv.site,emby策略
 
-#zn emby
-DOMAIN,emby.zn.al,emby策略
+#叔服
+DOMAIN,emby3.mcjoker.xyz,emby策略
+
+
 
 #云云-机场服
 #DOMAIN,yunti.online,Another
