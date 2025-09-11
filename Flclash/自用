@@ -12,7 +12,7 @@ proxy-providers:
 
   Flower:
     <<: *p
-    url: "https://api-huacloud.net/sub?target=clash&insert=true&emoji=true&udp=true&clash.doh=true&new_name=true&filename=Flower_SS.yaml&url=https%3A%2F%2Fapi.xmancdn.net%2Fosubscribe.php%3Fsid%3D193589%26token%3DDMx3dzVZEFDh%26sip002%3D1"
+    url: ""
     proxy: DIRECT
     #override:
       #additional-prefix: "Flower"
