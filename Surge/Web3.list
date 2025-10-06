@@ -1,0 +1,257 @@
+# > Crypto_Web3_Detailed.list
+# > Converted from linux.do JSON rule set
+# > Detailed categorized version styled after GitHub Web3.list
+# > Last Updated: 2025-10-05
+
+# =====================================================
+# > Exchanges 交易所
+# =====================================================
+DOMAIN-KEYWORD,binance
+DOMAIN-KEYWORD,bitget
+DOMAIN-KEYWORD,huobi
+DOMAIN-SUFFIX,aex.com
+DOMAIN-SUFFIX,bibox.com
+DOMAIN-SUFFIX,bitbank.cc
+DOMAIN-SUFFIX,bitfinex.com
+DOMAIN-SUFFIX,bitflyer.com
+DOMAIN-SUFFIX,bitflyer.jp
+DOMAIN-SUFFIX,bithumb.com
+DOMAIN-SUFFIX,bitmex.com
+DOMAIN-SUFFIX,bitquick.co
+DOMAIN-SUFFIX,bitstamp.net
+DOMAIN-SUFFIX,bittrex.com
+DOMAIN-SUFFIX,bybit.com
+DOMAIN-SUFFIX,cex.io
+DOMAIN-SUFFIX,coincheck.com
+DOMAIN-SUFFIX,coinone.co.kr
+DOMAIN-SUFFIX,coinonecore.com
+DOMAIN-SUFFIX,coinonecorp.com
+DOMAIN-SUFFIX,coinowo.com
+DOMAIN-SUFFIX,ftx.com
+DOMAIN-SUFFIX,gate.ac
+DOMAIN-SUFFIX,gate.io
+DOMAIN-SUFFIX,gemini.com
+DOMAIN-SUFFIX,kraken.com
+DOMAIN-SUFFIX,kucoin.com
+DOMAIN-SUFFIX,liquid.com
+DOMAIN-SUFFIX,mexc.com
+DOMAIN-SUFFIX,okex.com
+DOMAIN-SUFFIX,okx.com
+DOMAIN-SUFFIX,poloniex.com
+DOMAIN-SUFFIX,zb.app
+DOMAIN-SUFFIX,zb.com
+DOMAIN-SUFFIX,zb.io
+DOMAIN-SUFFIX,zb.live
+
+# =====================================================
+# > DeFi 去中心化金融
+# =====================================================
+DOMAIN-KEYWORD,uniswap
+DOMAIN-KEYWORD,pancakeswap
+DOMAIN-KEYWORD,defillama
+DOMAIN-KEYWORD,truefi
+DOMAIN-SUFFIX,1inch.io
+DOMAIN-SUFFIX,aave.com
+DOMAIN-SUFFIX,clearpool.finance
+DOMAIN-SUFFIX,compound.finance
+DOMAIN-SUFFIX,curve.fi
+DOMAIN-SUFFIX,dextools.io
+DOMAIN-SUFFIX,llama.fi
+DOMAIN-SUFFIX,maple.finance
+DOMAIN-SUFFIX,raydium.io
+DOMAIN-SUFFIX,save.finance
+DOMAIN-SUFFIX,sushi.com
+DOMAIN-SUFFIX,synthetix.io
+DOMAIN-SUFFIX,tokenpocket.pro
+DOMAIN-SUFFIX,tokenterminal.com
+DOMAIN-SUFFIX,traderjoexyz.com
+DOMAIN-SUFFIX,unisat.io
+DOMAIN-SUFFIX,vfat.tools
+DOMAIN-SUFFIX,zapper.fi
+
+# =====================================================
+# > NFT 非同质化代币
+# =====================================================
+DOMAIN-KEYWORD,opensea
+DOMAIN-KEYWORD,nftgo
+DOMAIN-KEYWORD,nftscan
+DOMAIN-KEYWORD,nftstatic
+DOMAIN-SUFFIX,cryptoart.io
+DOMAIN-SUFFIX,fragment.com
+DOMAIN-SUFFIX,makersplace.com
+DOMAIN-SUFFIX,nftcalendar.io
+DOMAIN-SUFFIX,nonfungible.com
+
+# =====================================================
+# > Wallets 钱包服务
+# =====================================================
+DOMAIN-KEYWORD,trezor
+DOMAIN-KEYWORD,walletconnect
+DOMAIN-SUFFIX,jaxx.io
+DOMAIN-SUFFIX,myetherwallet.com
+DOMAIN-SUFFIX,onekey.so
+DOMAIN-SUFFIX,phantom.app
+DOMAIN-SUFFIX,token.im
+DOMAIN-SUFFIX,tronlink.org
+DOMAIN-SUFFIX,trustwalletapp.com
+DOMAIN-SUFFIX,wallet.okex.org
+
+# =====================================================
+# > Explorers 区块链浏览器
+# =====================================================
+DOMAIN-KEYWORD,bscscan
+DOMAIN-KEYWORD,etherscan
+DOMAIN-KEYWORD,tronscan
+DOMAIN-SUFFIX,ethernodes.org
+DOMAIN-SUFFIX,ethermine.org
+DOMAIN-SUFFIX,watchtheburn.com
+DOMAIN-SUFFIX,zkscan.io
+DOMAIN-SUFFIX,zksync.io
+
+# =====================================================
+# > Data / Analytics 数据分析
+# =====================================================
+DOMAIN-KEYWORD,coinalyze
+DOMAIN-KEYWORD,coingecko
+DOMAIN-KEYWORD,coinglass
+DOMAIN-KEYWORD,coinmarketcap
+DOMAIN-KEYWORD,cryptoquant
+DOMAIN-KEYWORD,fundingrates
+DOMAIN-SUFFIX,bytetree.com
+DOMAIN-SUFFIX,cbeci.org
+DOMAIN-SUFFIX,coincheckup.com
+DOMAIN-SUFFIX,coincodex.com
+DOMAIN-SUFFIX,coinmetrics.io
+DOMAIN-SUFFIX,cryptofees.info
+DOMAIN-SUFFIX,cryptorank.io
+DOMAIN-SUFFIX,cryptoslam.io
+DOMAIN-SUFFIX,duneanalytics.com
+DOMAIN-SUFFIX,intotheblock.com
+DOMAIN-SUFFIX,loanscan.io
+DOMAIN-SUFFIX,nyctale.io
+DOMAIN-SUFFIX,stateofthedapps.com
+DOMAIN-SUFFIX,tokenview.com
+DOMAIN-SUFFIX,tradingview.com
+DOMAIN-SUFFIX,viewbase.com
+
+# =====================================================
+# > News / Media 行业资讯
+# =====================================================
+DOMAIN-KEYWORD,coindesk
+DOMAIN-KEYWORD,cointelegraph
+DOMAIN-SUFFIX,theblock.co
+DOMAIN-SUFFIX,vitalik.ca
+
+# =====================================================
+# > L1 / L2 / Ecosystems 公链生态
+# =====================================================
+DOMAIN-KEYWORD,arweave
+DOMAIN-KEYWORD,ethereum
+DOMAIN-KEYWORD,hecochain
+DOMAIN-KEYWORD,ripple
+DOMAIN-KEYWORD,galxe
+DOMAIN-SUFFIX,ar-io.net
+DOMAIN-SUFFIX,arbitrum.io
+DOMAIN-SUFFIX,avax.network
+DOMAIN-SUFFIX,boba.network
+DOMAIN-SUFFIX,eos.io
+DOMAIN-SUFFIX,filecoin.io
+DOMAIN-SUFFIX,ipfs.io
+DOMAIN-SUFFIX,lightning.community
+DOMAIN-SUFFIX,lightning.engineering
+DOMAIN-SUFFIX,optimism.io
+DOMAIN-SUFFIX,solana.com
+DOMAIN-SUFFIX,sui.io
+DOMAIN-SUFFIX,sui.rpcpool.com
+DOMAIN-SUFFIX,suiet.app
+DOMAIN-SUFFIX,suilend.fi
+DOMAIN-SUFFIX,suins.io
+DOMAIN-SUFFIX,suiscan.xyz
+DOMAIN-SUFFIX,suivision.xyz
+DOMAIN-SUFFIX,wbtc.network
+
+# =====================================================
+# > Infrastructure / Dev 基础设施 / RPC / Dev
+# =====================================================
+DOMAIN-KEYWORD,infura
+DOMAIN-KEYWORD,blockfrost
+DOMAIN-SUFFIX,chainalysis.com
+DOMAIN-SUFFIX,docs.lotu.sh
+DOMAIN-SUFFIX,flashbots.net
+DOMAIN-SUFFIX,parity.io
+DOMAIN-SUFFIX,thegraph.com
+DOMAIN-SUFFIX,token-api.metaswap.codefi.network
+
+# =====================================================
+# > Payments 法币网关 / 支付服务
+# =====================================================
+DOMAIN-KEYWORD,moonpay
+DOMAIN-KEYWORD,invity
+DOMAIN-KEYWORD,redotpay
+DOMAIN-SUFFIX,circle.com
+DOMAIN-SUFFIX,paxful.com
+DOMAIN-SUFFIX,chippay.com
+
+# =====================================================
+# > Mining 挖矿 / 节点
+# =====================================================
+DOMAIN-SUFFIX,f2pool.com
+DOMAIN-SUFFIX,poolin.com
+DOMAIN-SUFFIX,btc.com
+DOMAIN-SUFFIX,btcbox.co.jp
+
+# =====================================================
+# > DAO / Foundations 官方与组织
+# =====================================================
+DOMAIN-SUFFIX,devcon.org
+DOMAIN-SUFFIX,makerdao.com
+DOMAIN-SUFFIX,block.one
+
+# =====================================================
+# > Others 其他 Web3 相关工具
+# =====================================================
+DOMAIN-KEYWORD,bitopro
+DOMAIN-KEYWORD,bnappzh
+DOMAIN-KEYWORD,bnbchain
+DOMAIN-KEYWORD,bnbstatic
+DOMAIN-KEYWORD,bnbzh
+DOMAIN-KEYWORD,bntrace
+DOMAIN-KEYWORD,coinalyze
+DOMAIN-KEYWORD,cryptocompare
+DOMAIN-KEYWORD,cryptomus
+DOMAIN-KEYWORD,dappradar
+DOMAIN-KEYWORD,deribit
+DOMAIN-KEYWORD,eosflare
+DOMAIN-KEYWORD,eospark
+DOMAIN-KEYWORD,eostracker
+DOMAIN-KEYWORD,hashflow
+DOMAIN-KEYWORD,marketwebb
+DOMAIN-KEYWORD,metalpha
+DOMAIN-KEYWORD,mexcsensors
+DOMAIN-KEYWORD,moonshot
+DOMAIN-KEYWORD,mystenlabs
+DOMAIN-KEYWORD,mytokenapi
+DOMAIN-KEYWORD,polymarket
+DOMAIN-KEYWORD,saasexch
+DOMAIN-KEYWORD,satoshilabs
+DOMAIN-KEYWORD,suitechsui
+DOMAIN-KEYWORD,wintermute
+DOMAIN-KEYWORD,wisekey
+DOMAIN-KEYWORD,yingwangtech
+
+# =====================================================
+# > CDN / Infra Hosts 技术依赖
+# =====================================================
+DOMAIN-SUFFIX,d3sknckuh1o9tg.cloudfront.net
+DOMAIN-SUFFIX,crt.r2m01.amazontrust.com
+DOMAIN-SUFFIX,crt.rootca1.amazontrust.com
+DOMAIN-SUFFIX,crt.rootg2.amazontrust.com
+DOMAIN-SUFFIX,domain-config-1306379396.file.myqcloud.com
+DOMAIN-SUFFIX,public-1306379396.file.myqcloud.com
+DOMAIN-SUFFIX,static-file-1306379396.file.myqcloud.com
+DOMAIN-SUFFIX,m.api.forter.com
+DOMAIN-SUFFIX,addfd325e6e3.cdn4.forter.com
+DOMAIN-SUFFIX,b2d8207c-e08a-45cd-bc97-268da85016d2-addfd325e6e3.cdn.forter.com
+DOMAIN-SUFFIX,c0eabd3c-debc-413d-8167-993d78321dc7-addfd325e6e3.cdn.forter.com
+DOMAIN-SUFFIX,bin-prod-new-websocket-alb-1463526464.ap-northeast-1.elb.amazonaws.com
+DOMAIN-SUFFIX,aad90d5c0e88c4b4285bd912f64d970d-1403944741.ap-northeast-1.elb.amazonaws.com
