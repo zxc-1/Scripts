@@ -6,3 +6,6 @@ cd /opt/emby_notifier
 docker compose down
 docker compose build
 docker compose up -d
+
+看日志
+docker logs -f emby_notifier 
