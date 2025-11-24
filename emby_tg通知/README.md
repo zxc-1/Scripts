@@ -9,10 +9,10 @@ Emby Notifier v1.1.0 部署说明
 
 1.1 环境要求
 	•	一台可以运行 Docker 的服务器（Linux 推荐）
-	•	已经在跑的 Emby 服务（例如：http://154.12.28.250:8096）
+	•	已经在跑的 Emby 服务（例如：http://IP:8096）
 	•	Telegram 机器人 & 频道：
 	•	一个 Bot Token（TG_BOT_TOKEN）
-	•	一个频道/群 ID（TG_CHAT_ID，通常是负数，如 -1003218964901）
+	•	一个频道/群 ID（TG_CHAT_ID，通常是负数，如 -100321896XXXX）
 
 1.2 代码目录结构（示例）
 
@@ -40,8 +40,7 @@ Emby Notifier v1.1.0 部署说明
 
 2.1 示例 docker-compose.yml
 
-在 /home/emby_notifier_T3.0/docker-compose.yml 填入类似内容（如果已存在，按下面对照调整即可）：
-version: "3.9"
+在 /home/emby_notifier_v1.1.0/docker-compose.yml 填入类似内容（如果已存在，按下面对照调整即可）：
 
 services:
   emby_notifier:
@@ -51,8 +50,8 @@ services:
 
     environment:
       TG_BOT_TOKEN: "你的_TG_BOT_TOKEN"
-      TG_CHAT_ID: "-1003218964901"               # 你的频道/群 ID
-      EMBY_BASE_URL: "http://154.12.28.250:8096" # 你的 Emby 面板地址
+      TG_CHAT_ID: "-10032189xxxxx"               # 你的频道/群 ID
+      EMBY_BASE_URL: "http://IP:端口" # 你的 Emby 面板地址
       EMBY_API_KEY: "你的_emby_api_key"
       TMDB_API_KEY: "你的_tmdb_api_key"
 
@@ -62,15 +61,14 @@ services:
       MI_INTERVAL: "5"
 
     volumes:
-      # 这里要和 Emby/MediaHelper 使用的路径一致
+      # 这里要和Emby使用的路径一致
       - /media:/media:ro
-      - /home/MediaHelp/strm:/home/MediaHelp/strm:ro
 
     ports:
       # 宿主机 8000 暴露给 Emby 调用 Webhook
       - "8000:8000"
-3. 配置项说明（环境变量）
 
+3. 配置项说明（环境变量）
 所有配置通过环境变量注入（在 docker-compose.yml 的 environment 中）。
 
 3.1 Telegram 相关
@@ -80,17 +78,15 @@ services:
 	•	TG_CHAT_ID
 	•	接收通知的频道或群 ID
 	•	频道一般是负数：-100xxxxxxxxxx
-	•	你现在用的是类似 -1003218964901 这样的数字
 
-机器人必须已经有权限在该频道/群里发消息（你已经在用，就照旧填）。
+机器人必须已经有权限在该频道/群里发消息。
 
 ⸻
 
 3.2 Emby 相关
 	•	EMBY_BASE_URL
 	•	你的 Emby 服务地址（对这个容器可达）
-	•	示例：http://154.12.28.250:8096
-	•	不要带 /emby 之类的尾巴，末尾不要加 /
+	•	示例：http://IP:端口
 	•	EMBY_API_KEY
 	•	Emby 后台生成的 API Key，用来访问封面等资源
 	•	Emby 后台生成方式：
@@ -98,9 +94,6 @@ services:
 	2.	进入：控制台 → 高级 → API 密钥（或类似选项）
 	3.	新建一个密钥，备注随便写（例如 emby_notifier）
 	4.	把生成的字符串填到 EMBY_API_KEY
-
-这个 Key 会被用来拼接封面地址：
-http://154.12.28.250:8096/Items/{ItemId}/Images/Backdrop?api_key=...&maxWidth=1200&quality=90
 
 ⸻
 
@@ -135,7 +128,7 @@ xxx-mediainfo.json 或 xxx.mediainfo.json
 4.1 构建镜像并启动
 
 在服务器上执行：
-cd /home/emby_notifier_T3.0
+cd /home/emby_notifier_v1.1.0
 
 # 停掉旧容器（如果有）
 docker compose down
@@ -163,12 +156,12 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 http://服务器IP:8000/emby-webhook
 
 具体界面可能因为插件版本略有不同，下面是通用步骤（你之前已经配置过，只是现在换了地址）：
-	1.	打开 Emby 管理后台（例如 http://154.12.28.250:8096）。
+	1.	打开 Emby 管理后台（例如 http://IP:端口）。
 	2.	以管理员账号登录。
 	3.	找到 「插件」 / 「Webhooks」 / 「通知」 相关设置：
 	•	常见插件名：Webhooks、Webhook Notifications 等。
 	4.	在 Webhook 配置页中新建一个 webhook：
-	•	URL 填：http://154.12.28.250:8000/emby-webhook
+	•	URL 填：http://IP:端口/emby-webhook
 
 注意端口是 8000，路径是 /emby-webhook。
 
