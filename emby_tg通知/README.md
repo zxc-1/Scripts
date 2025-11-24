@@ -9,7 +9,7 @@ Emby Notifier v1.1.0 部署说明
 
 1.1 环境要求
 	•	一台可以运行 Docker 的服务器（Linux 推荐）
-	•	已经在跑的 Emby 服务（例如：http://IP:8096）
+	•	已经在跑的 Emby 服务（例如：http://IP:端口）
 	•	Telegram 机器人 & 频道：
 	•	一个 Bot Token（TG_BOT_TOKEN）
 	•	一个频道/群 ID（TG_CHAT_ID，通常是负数，如 -100321896XXXX）
@@ -45,7 +45,7 @@ Emby Notifier v1.1.0 部署说明
 services:
   emby_notifier:
     build: .
-    container_name: emby_notifier_T3.0
+    container_name: emby_notifier_v1.1.0
     restart: unless-stopped
 
     environment:
