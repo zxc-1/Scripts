@@ -1,27 +1,32 @@
 /**
  * GLaDOS 自动签到（Surge 版）
- * 原项目思路：POST /api/user/checkin + GET /api/user/status，Body: {"token":"glados.one"}
- * 参考： https://glados.rocks 以及 kingkare/GLaDOS（Python 实现）。 
+ * 抓包要点（你这份 HAR）：
+ * - 接口域名已不再是 glados.rocks，而是 glados.cloud（同时部分场景也会用 glados.one）
+ * - POST /api/user/checkin 的 body 里 token 会跟随域名（例如 glados.cloud / glados.one）
  */
 
 const UA_LIST = [
+  // 贴近你抓包里的 iOS Chrome UA（也保留桌面/安卓以防）
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 26_3_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/146.0.7680.24 Mobile/15E148 Safari/604.1",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Linux; Android 10; zh-CN; SM-G9750) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.1 Safari/605.1.15",
 ];
 
-const API_BASE = "https://glados.rocks";
-const CHECKIN_URL = `${API_BASE}/api/user/checkin`;
-const STATUS_URL  = `${API_BASE}/api/user/status`;
+const DEFAULT_API_BASES = ["https://glados.cloud", "https://glados.one"];
 
-// ------- 偏好项（到 Surge -> Scripts -> glados.surge.js 的 Arguments / 或用持久化键写入）-------
-// 支持三种写法（二选一即可）：
+// ------- 偏好项（Surge -> Scripts -> glados.surge.js 的 Arguments / 或用持久化键写入）-------
+// 必填：
+// - GLADOS_COOKIE（示例：koa:sess=xxx; koa:sess.sig=yyy）
+//
+// 可选：
+// - GLADOS_API_BASE（强制指定域名：例如 https://glados.cloud；不填则按 DEFAULT_API_BASES 依次尝试）
+//
+// 多账号仍支持原来的三种写法：
 // 1) 单账号：GLADOS_COOKIE
 // 2) 多账号成对：GLADOS_EMAIL_1 / GLADOS_COOKIE_1，GLADOS_EMAIL_2 / GLADOS_COOKIE_2...
 // 3) 批量：GLADOS_EMAILS（逗号分隔），GLADOS_COOKIES（逗号分隔）
 //
-// 可选 Telegram 推送（如果不填就只用 Surge 本地通知）：
-// TG_BOT_TOKEN, TG_CHAT_ID
+// 可选 Telegram 推送：TG_BOT_TOKEN, TG_CHAT_ID
 // ---------------------------------------------------------------------------------------------
 
 const $prefs = {
@@ -33,15 +38,27 @@ function pickUA() {
   return UA_LIST[Math.floor(Math.random() * UA_LIST.length)];
 }
 
-function headers(cookie) {
+function hostFromBase(base) {
+  return String(base || "")
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .trim();
+}
+
+function apiBases() {
+  const v = ($prefs.read("GLADOS_API_BASE") || "").trim();
+  return v ? [v] : DEFAULT_API_BASES;
+}
+
+function headers(cookie, apiBase) {
   return {
     "Accept": "application/json, text/plain, */*",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    // 仓库里有一个占位 Authorization，这里不需要带；保持最小必需头
-    "Content-Type": "application/json;charset=UTF-8",
+    // 避免 br 造成部分环境解压异常
+    "Accept-Encoding": "gzip, deflate",
+    "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+    "Content-Type": "application/json;charset=utf-8",
     "Cookie": cookie,
-    "Origin": API_BASE,
+    "Origin": apiBase,
     "User-Agent": pickUA(),
   };
 }
@@ -67,40 +84,58 @@ function httpGet(url, hdrs) {
 function nowStr() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function translateMessage(raw) {
-  if (raw === "Please Try Tomorrow") return "签到失败，请明天再试";
-  if (typeof raw === "string" && raw.includes("Checkin! Got")) {
-    const m = raw.match(/Got\s+(\d+(?:\.\d+)?)\s+Points/i);
+function translateMessage(rawMessage, points) {
+  if (typeof points === "number") return `签到成功，获得 ${points} 积分`;
+  if (rawMessage === "Please Try Tomorrow") return "签到失败，请明天再试";
+  if (rawMessage === "Checkin Repeats! Please Try Tomorrow") return "重复签到，请明天再试";
+  if (typeof rawMessage === "string" && rawMessage.includes("Checkin! Got")) {
+    const m = rawMessage.match(/Got\s+(\d+(?:\.\d+)?)\s+Points/i);
     return m ? `签到成功，获得 ${m[1]} 积分` : "签到成功";
   }
-  if (raw === "Checkin Repeats! Please Try Tomorrow") return "重复签到，请明天再试";
-  return `未知的签到结果: ${raw ?? ""}`;
+  return `未知的签到结果: ${rawMessage ?? ""}`;
 }
 
 async function signOnce(email, cookie) {
-  const hdrs = headers(cookie);
-  try {
-    const r1 = await httpPost(CHECKIN_URL, { token: "glados.one" }, hdrs);
-    const j1 = JSON.parse(r1.body || "{}");
-    const msg = translateMessage(j1.message);
+  let lastErr = "";
+  for (const base of apiBases()) {
+    const apiBase = base.replace(/\/+$/, "");
+    const hdrs = headers(cookie, apiBase);
+    const token = hostFromBase(apiBase);
 
-    const r2 = await httpGet(STATUS_URL, hdrs);
-    const j2 = JSON.parse(r2.body || "{}");
-    const leftDaysRaw = j2?.data?.leftDays;
-    const left = typeof leftDaysRaw === "number" ? leftDaysRaw.toString() : String(leftDaysRaw || "未知");
+    try {
+      const checkinUrl = `${apiBase}/api/user/checkin`;
+      const statusUrl = `${apiBase}/api/user/status`;
 
-    return {
-      ok: true,
-      email: email || j2?.data?.email || "(未提供邮箱)",
-      message: msg,
-      leftDays: left,
-    };
-  } catch (e) {
-    return { ok: false, email: email || "(未提供邮箱)", message: `请求异常：${e}`, leftDays: "error" };
+      const r1 = await httpPost(checkinUrl, { token }, hdrs);
+      if (String(r1.status) !== "200") throw new Error(`Checkin HTTP ${r1.status}: ${String(r1.body || "").slice(0, 120)}`);
+
+      const j1 = JSON.parse(r1.body || "{}");
+      const msg = translateMessage(j1.message, j1.points);
+
+      const r2 = await httpGet(statusUrl, hdrs);
+      if (String(r2.status) !== "200") throw new Error(`Status HTTP ${r2.status}: ${String(r2.body || "").slice(0, 120)}`);
+
+      const j2 = JSON.parse(r2.body || "{}");
+      const leftDaysRaw = j2?.data?.leftDays;
+      const left = typeof leftDaysRaw === "number" ? leftDaysRaw.toString() : String(leftDaysRaw || "未知");
+
+      return {
+        ok: true,
+        email: email || j2?.data?.email || "(未提供邮箱)",
+        message: msg,
+        leftDays: left,
+        apiBase,
+      };
+    } catch (e) {
+      lastErr = `${apiBase} -> ${e}`;
+      // 尝试下一个域名
+    }
   }
+
+  return { ok: false, email: email || "(未提供邮箱)", message: `请求异常：${lastErr || "unknown"}`, leftDays: "error", apiBase: "-" };
 }
 
 function parseAccounts() {
@@ -109,8 +144,8 @@ function parseAccounts() {
   if (single) return [{ email: $prefs.read("GLADOS_EMAIL") || "", cookie: single }];
 
   // 批量（逗号）
-  const emailsBulk = ($prefs.read("GLADOS_EMAILS") || "").split(",").map(s => s.trim()).filter(Boolean);
-  const cookiesBulk = ($prefs.read("GLADOS_COOKIES") || "").split(",").map(s => s.trim()).filter(Boolean);
+  const emailsBulk = ($prefs.read("GLADOS_EMAILS") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const cookiesBulk = ($prefs.read("GLADOS_COOKIES") || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (emailsBulk.length && emailsBulk.length === cookiesBulk.length) {
     return emailsBulk.map((e, i) => ({ email: e, cookie: cookiesBulk[i] }));
   }
@@ -135,7 +170,7 @@ async function sendTelegram(summaryText) {
   const body = {
     chat_id: chatId,
     text: summaryText,
-    parse_mode: "HTML"
+    parse_mode: "HTML",
   };
 
   return new Promise((resolve) => {
@@ -160,16 +195,16 @@ async function sendTelegram(summaryText) {
   const results = [];
   for (const { email, cookie } of accounts) {
     // 防止过快，轻微随机延时（0~2s），避免风控
-    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000)));
+    await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 2000)));
     results.push(await signOnce(email, cookie));
   }
 
-  const success = results.filter(r => r.ok && r.message.includes("成功")).length;
-  const repeats = results.filter(r => r.ok && r.message.includes("重复")).length;
-  const failed  = results.filter(r => !r.ok || r.message.includes("失败")).length;
+  const success = results.filter((r) => r.ok && r.message.includes("成功")).length;
+  const repeats = results.filter((r) => r.ok && r.message.includes("重复")).length;
+  const failed = results.filter((r) => !r.ok || r.message.includes("失败") || r.message.includes("异常")).length;
 
   // 本地通知
-  const lines = results.map(r => `• ${r.email} | ${r.message} | 剩余: ${r.leftDays} 天`);
+  const lines = results.map((r) => `• ${r.email} | ${r.message} | 剩余: ${r.leftDays} 天 | ${r.apiBase}`);
   const title = `GLaDOS 签到（${nowStr()}）`;
   const subtitle = `成功 ${success}，重复 ${repeats}，失败 ${failed}`;
   $notification.post(title, subtitle, lines.join("\n"));
@@ -179,10 +214,10 @@ async function sendTelegram(summaryText) {
     `当前时间: ${nowStr()}`,
     "",
     "GLaDOS 签到结果：",
-    ...results.map(r => `- ${r.email}: ${r.message}`),
+    ...results.map((r) => `- ${r.email}: ${r.message}`),
     "",
     "账号状态：",
-    ...results.map(r => `- ${r.email}: 剩余 ${r.leftDays} 天`)
+    ...results.map((r) => `- ${r.email}: 剩余 ${r.leftDays} 天（${r.apiBase}）`),
   ].join("\n");
   await sendTelegram(tgText);
 
