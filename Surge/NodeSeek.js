@@ -22,6 +22,8 @@ const $prefs = {
 };
 
 // ========== HTTP-REQUEST：获取 Cookie + UA ==========
+$notification.post("NodeSeek", "🎯 命中规则", $request.url);
+
 if (typeof $request !== "undefined") {
   try {
     const rawCookie = $request.headers?.Cookie || $request.headers?.cookie || "";
