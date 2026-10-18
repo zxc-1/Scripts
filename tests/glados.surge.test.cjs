@@ -170,8 +170,24 @@ test('the module schedules its daily 09:10 cron using the documented Surge forma
   const cron = module.split('\n').find(line => /type=cron(?:,|$)/.test(line));
   assert.ok(cron, 'a named cron script must be registered');
   assert.match(cron, /cronexp="10 9 \* \* \*"/);
-  assert.match(cron, /timeout=60/);
+  assert.match(cron, /timeout=\d+(?:,|$)/);
   assert.match(cron, /wake-system=true/);
+});
+
+test('the module timeout covers twenty indexed accounts including their request and pacing time', async () => {
+  const store = { GLADOS_API_BASE: storedSession.GLADOS_API_BASE };
+  for (let index = 1; index <= 20; index++) {
+    Object.assign(store, { [`GLADOS_EMAIL_${index}`]: `test-${index}@example.com`, [`GLADOS_COOKIE_${index}`]: COOKIE, [`GLADOS_USER_AGENT_${index}`]: MAC_UA });
+  }
+  const result = await runScript({ store });
+  assert.equal(result.requests.length, 40);
+  assert.match(result.text, /成功 20，重复 0，失败 0/);
+  const requestSeconds = result.requests.reduce((sum, request) => sum + (request.timeout ?? 5), 0);
+  const pacingSeconds = 20 * 2;
+  const module = fs.readFileSync(modulePath, 'utf8');
+  const cron = module.split('\n').find(line => line.startsWith('GLaDOS_Checkin'));
+  const timeoutSeconds = Number(cron.match(/timeout=(\d+)(?:,|$)/)?.[1]);
+  assert.ok(timeoutSeconds > requestSeconds + pacingSeconds, `${timeoutSeconds}s module timeout cannot cover ${requestSeconds + pacingSeconds}s plus script work`);
 });
 
 test('revisiting status and checkin with the saved session is silent and writes nothing', async () => {

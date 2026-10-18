@@ -15,7 +15,9 @@
 
 账号顺序执行，单次请求超时设为 4 秒，每个接口的动态验证最多重试两次；网络超时不会自动重发签到 POST，以免把未知结果误报为成功。签到结果通过 Surge 本地通知显示。
 
-脚本不另设总运行预算，整个 cron 由模块中的 `timeout=60` 控制。4 秒和 60 秒都是本项目配置值，不是 Surge 的强制上限；官方文档说明[单次 HTTP 请求超时](https://manual.nssurge.com/scripting/api.html)和[脚本总超时](https://manual.nssurge.com/scripting/overview.html)均按秒设置，默认均为 5 秒。账号较多或网络较慢时，总运行时间仍可能超过模块配置的 60 秒并被 Surge 终止，届时可能没有完整的汇总通知；可按实际需求调整模块中的 `timeout`。
+脚本不另设总运行预算，模块默认设置 `timeout=300`。依据是 10 个账号 × 2 个接口 × 每接口最多 3 次请求 × 单次 4 秒，共 240 秒请求耗时，再留 25% 的执行余量。脚本完成后立即通过 `$done()` 退出；可在本地模块的 `AnyRouter_Checkin` 行修改 `timeout`。
+
+4 秒和 300 秒都是项目配置值。[官方 HTTP API 文档](https://manual.nssurge.com/scripting/api.html)和[脚本配置文档](https://manual.nssurge.com/scripting/overview.html)说明两种超时都按秒设置、默认均为 5 秒；[cron 文档](https://manual.nssurge.com/scripting/cron.html)明确允许根据任务需求增大脚本超时，但这些文档未公布硬性最大值，也未说明 `0` 可用于关闭超时。300 秒是上述执行路径的参考配置，实际仍可能受 Surge 引擎调度、设备休眠或系统终止影响。
 
 需要 Surge iOS 5.9+ / Mac 5.5+，用于关闭 HTTP 自动重定向和共享 Cookie 管理。登录会话只发往 `anyrouter.top`。
 

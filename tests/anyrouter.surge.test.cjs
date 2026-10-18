@@ -320,7 +320,7 @@ test('module matches only authenticated self responses and schedules one daily r
   const cron = module.split('\n').filter(line => /type=cron(?:,|$)/.test(line));
   assert.equal(cron.length, 1);
   assert.match(cron[0], /cronexp="10 9 \* \* \*"/);
-  assert.match(cron[0], /timeout=60/);
+  assert.match(cron[0], /timeout=\d+(?:,|$)/);
   assert.match(module, /hostname\s*=\s*%APPEND% anyrouter\.top/);
   const paths = [...module.matchAll(/script-path=([^,\n]+)/g)].map(m => m[1]);
   assert.equal(paths.length, 2);
@@ -329,14 +329,21 @@ test('module matches only authenticated self responses and schedules one daily r
 });
 
 
-test('slow accounts continue beyond 45 seconds while retaining the configured request timeout', async () => {
-  const accounts = Array.from({ length: 7 }, (_, index) => ({ ...ACCOUNT, id: index + 1, session: `synthetic-session-${index + 1}` }));
-  const r = await run({ store: stored(accounts), now: 0, elapseMs: 4000 });
-  assert.equal(r.requests.length, 14);
-  assert.equal(r.now, 56000);
+test('the module timeout covers ten slow accounts with two challenges on each API', async () => {
+  const accounts = Array.from({ length: 10 }, (_, index) => ({ ...ACCOUNT, id: index + 1, session: `synthetic-session-${index + 1}` }));
+  const r = await run({ store: stored(accounts), now: 0, elapseMs: 4000, reply: ({ request: req, index }) => ({
+    status: 200,
+    body: index % 3 < 2 ? WAF : req.url.endsWith('/self') ? authBody(Number(req.headers['New-API-User'])) : OK,
+  }) });
+  assert.equal(r.requests.length, 60);
+  assert.equal(r.now, 240000);
   assert.ok(r.requests.every(req => req.timeout === 4));
-  assert.match(r.text, /成功 7，重复 0，失败 0/);
+  assert.match(r.text, /成功 10，重复 0，失败 0/);
   assert.doesNotMatch(r.text, /时间预算|未发送/);
+  const module = fs.readFileSync(modulePath, 'utf8');
+  const cron = module.split('\n').find(line => line.startsWith('AnyRouter_Checkin'));
+  const timeoutSeconds = Number(cron.match(/timeout=(\d+)(?:,|$)/)?.[1]);
+  assert.ok(timeoutSeconds * 1000 > r.now, `${timeoutSeconds}s module timeout cannot cover ${r.now}ms of requests plus script work`);
 });
 
 test('accounts are checked sequentially to avoid bursts against the WAF', async () => {
