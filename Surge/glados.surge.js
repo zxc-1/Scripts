@@ -223,6 +223,40 @@ function checkinMessage(result) {
   throw new Error(`签到失败 (code ${result?.code ?? "未知"}): ${result?.message || "未知签到结果"}`);
 }
 
+async function pointsMessage(apiBase, hdrs) {
+  try {
+    const result = parseResponse(await httpGet(`${apiBase}/api/user/points`, hdrs), "Points");
+    if (result?.code !== 0) throw new Error(`积分接口拒绝请求 (code ${result?.code ?? "未知"}): ${result?.message || "未知错误"}`);
+    const raw = typeof result.points === "number" || typeof result.points === "string" ? String(result.points).trim() : "";
+    if (!/^\d+(?:\.\d+)?$/.test(raw)) throw new Error("积分余额无效");
+    const [integer, decimals = ""] = raw.split(".");
+    const balance = Number(integer);
+    if (!Number.isSafeInteger(balance)) throw new Error("积分余额无效");
+    const fraction = decimals.replace(/0+$/, "");
+    const balanceText = `${balance}${fraction ? `.${fraction}` : ""}`;
+    const plans = result.plans && typeof result.plans === "object" && !Array.isArray(result.plans) ? Object.values(result.plans) : [];
+    if (!plans.length || plans.some(plan => !plan || !Number.isSafeInteger(plan.points) || plan.points <= 0 || !Number.isSafeInteger(plan.days) || plan.days <= 0)) {
+      throw new Error("兑换档位无效");
+    }
+    // 余额的小数按十进制求差，避免接近兑换门槛时被浮点舍入成可兑换。
+    const complement = fraction.split("").map((digit, index) => (index === fraction.length - 1 ? 10 : 9) - Number(digit)).join("");
+    const progress = plans.sort((a, b) => a.points - b.points).map(plan => {
+      const gap = fraction ? `${plan.points - balance - 1}.${complement}` : String(plan.points - balance);
+      return `${plan.points} 分 → ${plan.days} 天：${balance >= plan.points ? "✅ 可兑换" : `还差 ${gap} 分`}`;
+    });
+    return [`当前积分: ${balanceText}`, ...progress].join("\n");
+  } catch (e) {
+    return `积分查询失败: ${e.message || String(e)}`;
+  }
+}
+
+function accountMessage(result) {
+  const icon = !result.ok ? "❌" : result.repeated ? "🟡" : "✅";
+  const lines = [`${icon} ${result.email}`, result.message];
+  if (result.ok) lines.push(`剩余时长: ${result.leftDays} 天`, result.pointsMessage);
+  return lines.join("\n");
+}
+
 async function signOnce(email, cookie, userAgent) {
   let lastErr = "";
   for (const base of apiBases()) {
@@ -240,7 +274,8 @@ async function signOnce(email, cookie, userAgent) {
       }
       const leftDaysRaw = j2.data.leftDays;
       const left = typeof leftDaysRaw === "number" ? String(leftDaysRaw) : String(leftDaysRaw || "未知");
-      return { ok: true, repeated: j1.code === 1, email: email || j2.data.email || "(未提供邮箱)", message: msg, leftDays: left, apiBase };
+      const points = await pointsMessage(apiBase, hdrs);
+      return { ok: true, repeated: j1.code === 1, email: email || j2.data.email || "(未提供邮箱)", message: msg, leftDays: left, apiBase, pointsMessage: points };
     } catch (e) {
       lastErr = `${apiBase} -> ${e}`;
     }
@@ -272,14 +307,12 @@ async function runCheckin() {
   const repeats = results.filter((r) => r.ok && r.repeated).length;
   const failed = results.filter((r) => !r.ok).length;
 
-  const lines = results.map(
-    (r) => `• ${r.email} | ${r.message} | 剩余: ${r.leftDays} 天 | ${r.apiBase}`
-  );
+  const lines = results.map(accountMessage);
 
   const title = `GLaDOS 签到（${nowStr()}）`;
   const subtitle = `成功 ${success}，重复 ${repeats}，失败 ${failed}`;
 
-  $notification.post(title, subtitle, lines.join("\n"));
+  $notification.post(title, subtitle, lines.join("\n\n"));
 
   $done();
 }

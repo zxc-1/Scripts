@@ -12,6 +12,7 @@ const WINDOWS_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const COOKIE = 'gld:sess=test-session; gld:sess.sig=test-signature';
 const storedSession = { GLADOS_COOKIE: COOKIE, GLADOS_USER_AGENT: MAC_UA, GLADOS_API_BASE: 'https://glados.network' };
 const statusBody = { code: 0, data: { email: 'test@example.com', leftDays: 342 } };
+const pointsBody = { code: 0, points: '276.0000000000000000', plans: { plan100: { points: 100, days: 10 }, plan200: { points: 200, days: 30 }, plan500: { points: 500, days: 100 } } };
 const unauthenticatedStatusBody = { code: -2, message: '没有权限' };
 const successBody = { code: 0, points: 10, message: 'Checkin! Got 10 Points', streak: 1, list: [] };
 const repeatBody = { code: 1, points: 0, message: "Today's observation logged. Return tomorrow for more points.", streak: 1, list: [] };
@@ -29,9 +30,10 @@ async function runScript(options = {}) {
   const respond = (method, request, callback) => {
     requests.push({ method, ...request });
     const isCheckin = request.url.endsWith('/api/user/checkin');
-    const reply = options.reply ? options.reply({ method, request, isCheckin }) : {
+    const isPoints = request.url.endsWith('/api/user/points');
+    const reply = options.reply ? options.reply({ method, request, isCheckin, isPoints }) : {
       status: 200,
-      body: isCheckin ? successBody : statusBody,
+      body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
     };
     queueMicrotask(() => callback(reply.error || null, { status: reply.status, headers: {} },
       typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body)));
@@ -77,13 +79,126 @@ test('an incomplete capture keeps the previous cookie and device paired', async 
   assert.equal(result.notifications.length, 0);
 });
 
-test('cron reuses the captured device on both API calls', async () => {
+test('cron reuses the captured device on the checkin, status and points calls', async () => {
   const result = await runScript({ store: storedSession });
-  assert.equal(result.requests.length, 2);
-  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA]);
+  assert.equal(result.requests.length, 3);
+  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, MAC_UA]);
   assert.deepEqual(JSON.parse(result.requests[0].body), { token: 'glados.network' });
   assert.match(result.text, /成功 1，重复 0，失败 0/);
   assert.match(result.text, /获得 10 积分/);
+});
+
+test('points notification uses the live balance and plans without redeeming anything', async () => {
+  const result = await runScript({ store: storedSession });
+  assert.match(result.text, /当前积分: 276(?:\n|$)/);
+  assert.match(result.text, /100 分 → 10 天：✅ 可兑换/);
+  assert.match(result.text, /200 分 → 30 天：✅ 可兑换/);
+  assert.match(result.text, /500 分 → 100 天：还差 224 分/);
+  assert.match(result.text, /✅ test@example\.com\n签到成功，获得 10 积分\n剩余时长: 342 天/);
+  assert.deepEqual(result.requests.map(r => [r.method, r.url]), [
+    ['POST', 'https://glados.network/api/user/checkin'],
+    ['GET', 'https://glados.network/api/user/status'],
+    ['GET', 'https://glados.network/api/user/points'],
+  ]);
+  assert.equal(result.notifications.length, 1);
+  assert.deepEqual(result.values, storedSession);
+});
+
+for (const balance of [0, 99, 100, 199, 200, 499, 500, 600, 99.5]) {
+  test(`points notification handles redemption boundaries for balance ${balance}`, async () => {
+    const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => ({
+      status: 200, body: isCheckin ? successBody : isPoints ? { ...pointsBody, points: String(balance) } : statusBody,
+    }) });
+    assert.match(result.text, new RegExp(`当前积分: ${String(balance).replace('.', '\\.')}\\n`));
+    for (const plan of Object.values(pointsBody.plans)) {
+      const expected = `${plan.points} 分 → ${plan.days} 天：${balance >= plan.points ? '✅ 可兑换' : `还差 ${plan.points - balance} 分`}`;
+      assert.ok(result.text.includes(expected), expected);
+    }
+  });
+}
+
+test('points notification follows changed server plans instead of assuming fixed tiers', async () => {
+  const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => ({
+    status: 200, body: isCheckin ? successBody : isPoints ? { ...pointsBody, plans: { longer: { points: 600, days: 120 }, starter: { points: 50, days: 4 } } } : statusBody,
+  }) });
+  assert.match(result.text, /50 分 → 4 天：✅ 可兑换/);
+  assert.match(result.text, /600 分 → 120 天：还差 324 分/);
+  assert.doesNotMatch(result.text, /100 分 → 10 天/);
+  assert.ok(result.text.indexOf('50 分 →') < result.text.indexOf('600 分 →'));
+});
+
+test('points notification formats a fractional gap without floating-point noise', async () => {
+  const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => ({
+    status: 200, body: isCheckin ? successBody : isPoints ? { ...pointsBody, points: '99.9000000000000000' } : statusBody,
+  }) });
+  assert.match(result.text, /100 分 → 10 天：还差 0\.1 分(?:\n|$)/);
+});
+
+test('points notification keeps a precise decimal just below a threshold non-redeemable', async () => {
+  const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => ({
+    status: 200, body: isCheckin ? successBody : isPoints ? { ...pointsBody, points: '99.9999999999999999' } : statusBody,
+  }) });
+  assert.match(result.text, /当前积分: 99\.9999999999999999/);
+  assert.match(result.text, /100 分 → 10 天：还差 0\.0000000000000001 分(?:\n|$)/);
+  assert.doesNotMatch(result.text, /可兑换/);
+});
+
+test('points notification preserves an already checked-in result', async () => {
+  const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => ({
+    status: 200, body: isCheckin ? repeatBody : isPoints ? pointsBody : statusBody,
+  }) });
+  assert.match(result.text, /成功 0，重复 1，失败 0/);
+  assert.match(result.text, /🟡 test@example\.com/);
+  assert.match(result.text, /当前积分: 276/);
+  assert.doesNotMatch(result.text, /获得 0 积分/);
+});
+
+test('points notification reports query failures without changing a confirmed checkin result', async () => {
+  const failures = [
+    { status: 401, body: { code: -2, message: 'Unauthorized' } },
+    { status: 200, body: { code: -2, message: 'Invalid session' } },
+    { status: 200, body: '<html>Challenge</html>' },
+    { status: 200, body: 'not json' },
+    { status: 0, body: '', error: 'Request timed out' },
+  ];
+  for (const failure of failures) {
+    const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => isPoints ? failure : ({ status: 200, body: isCheckin ? successBody : statusBody }) });
+    assert.match(result.text, /成功 1，重复 0，失败 0/);
+    assert.match(result.text, /积分查询失败/);
+    assert.doesNotMatch(result.text, /可兑换|还差 \d+ 分|当前积分: 0/);
+    assert.equal(result.requests.length, 3);
+  }
+});
+
+test('points notification never treats missing or malformed points as a zero balance', async () => {
+  for (const points of [undefined, null, '', ' ', false, [], {}, 'NaN', '1e3', -1, '-1', 'Infinity']) {
+    const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => ({
+      status: 200, body: isCheckin ? successBody : isPoints ? { ...pointsBody, points } : statusBody,
+    }) });
+    assert.match(result.text, /积分查询失败/);
+    assert.doesNotMatch(result.text, /可兑换|还差 \d+ 分|当前积分: 0/);
+  }
+});
+
+test('points notification reports invalid plans instead of using stale tiers', async () => {
+  for (const plans of [undefined, null, [], {}, { plan: null }, { plan: { points: 0, days: 10 } }, { plan: { points: 100, days: 'oops' } }]) {
+    const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => ({
+      status: 200, body: isCheckin ? successBody : isPoints ? { ...pointsBody, plans } : statusBody,
+    }) });
+    assert.match(result.text, /积分查询失败/);
+    assert.doesNotMatch(result.text, /可兑换|还差 \d+ 分/);
+  }
+});
+
+test('points notification keeps each account balance and redemption progress separate', async () => {
+  const store = { GLADOS_API_BASE: storedSession.GLADOS_API_BASE, GLADOS_EMAIL_1: 'one@example.com', GLADOS_COOKIE_1: COOKIE, GLADOS_USER_AGENT_1: MAC_UA, GLADOS_EMAIL_2: 'two@example.com', GLADOS_COOKIE_2: 'second-cookie', GLADOS_USER_AGENT_2: WINDOWS_UA };
+  const result = await runScript({ store, reply: ({ request, isCheckin, isPoints }) => ({
+    status: 200, body: isCheckin ? successBody : isPoints ? { ...pointsBody, points: request.headers.Cookie === COOKIE ? '276' : '50' } : statusBody,
+  }) });
+  const body = result.notifications[0][2];
+  assert.match(body, /✅ one@example\.com[\s\S]*当前积分: 276[\s\S]*还差 224 分\n\n✅ two@example\.com[\s\S]*当前积分: 50[\s\S]*100 分 → 10 天：还差 50 分[\s\S]*500 分 → 100 天：还差 450 分/);
+  assert.equal(result.requests.length, 6);
+  assert.deepEqual(result.requests.filter(r => r.url.endsWith('/points')).map(r => r.headers['User-Agent']), [MAC_UA, WINDOWS_UA]);
 });
 
 test('a missing device capture fails explicitly without sending a request', async () => {
@@ -139,14 +254,14 @@ test('non-JSON and HTTP errors remain visible', async () => {
 test('indexed accounts retain their individual login devices', async () => {
   const store = { GLADOS_API_BASE: 'https://glados.network', GLADOS_COOKIE_1: COOKIE, GLADOS_COOKIE_2: 'test-second-cookie', GLADOS_USER_AGENT_1: MAC_UA, GLADOS_USER_AGENT_2: WINDOWS_UA };
   const result = await runScript({ store });
-  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, WINDOWS_UA, WINDOWS_UA]);
+  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, MAC_UA, WINDOWS_UA, WINDOWS_UA, WINDOWS_UA]);
   assert.match(result.text, /成功 2，重复 0，失败 0/);
 });
 
 test('bulk accounts can specify each device with the same indexed keys', async () => {
   const store = { GLADOS_API_BASE: 'https://glados.network', GLADOS_EMAILS: 'one@example.com,two@example.com', GLADOS_COOKIES: `${COOKIE},test-second-cookie`, GLADOS_USER_AGENT_1: MAC_UA, GLADOS_USER_AGENT_2: WINDOWS_UA };
   const result = await runScript({ store });
-  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, WINDOWS_UA, WINDOWS_UA]);
+  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, MAC_UA, WINDOWS_UA, WINDOWS_UA, WINDOWS_UA]);
 });
 
 test('the Surge module validates status responses on the supported API hosts and appends MITM hosts', () => {
@@ -180,7 +295,7 @@ test('the module timeout covers twenty indexed accounts including their request 
     Object.assign(store, { [`GLADOS_EMAIL_${index}`]: `test-${index}@example.com`, [`GLADOS_COOKIE_${index}`]: COOKIE, [`GLADOS_USER_AGENT_${index}`]: MAC_UA });
   }
   const result = await runScript({ store });
-  assert.equal(result.requests.length, 40);
+  assert.equal(result.requests.length, 60);
   assert.match(result.text, /成功 20，重复 0，失败 0/);
   const requestSeconds = result.requests.reduce((sum, request) => sum + (request.timeout ?? 5), 0);
   const pacingSeconds = 20 * 2;
@@ -271,7 +386,7 @@ test('legacy Telegram settings never send a push or change the local checkin res
   for (const settings of [{ TG_BOT_TOKEN: '123:synthetic-token', TG_CHAT_ID: 'synthetic-chat' }, { TG_BOT_TOKEN: '123:synthetic-token' }, { TG_CHAT_ID: 'synthetic-chat' }]) {
     const store = { ...storedSession, ...settings };
     const result = await runScript({ store });
-    assert.deepEqual(result.requests.map(request => request.url), ['https://glados.network/api/user/checkin', 'https://glados.network/api/user/status']);
+    assert.deepEqual(result.requests.map(request => request.url), ['https://glados.network/api/user/checkin', 'https://glados.network/api/user/status', 'https://glados.network/api/user/points']);
     assert.match(result.text, /成功 1，重复 0，失败 0/);
     assert.doesNotMatch(result.text, /Telegram|synthetic-token/);
     assert.equal(result.notifications.length, 1);

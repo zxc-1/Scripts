@@ -196,7 +196,35 @@ async function api(account, jar, method, path) {
   }
 }
 
-async function signAccount(account) {
+async function quotaInfo(account, jar, getUnit) {
+  const result = parseResponse(await api(account, jar, "GET", "/api/user/self"), "额度查询");
+  if (result?.success !== true || result?.data?.id !== account.id) throw new Error("额度查询的登录状态或用户 ID 无效");
+  const { quota, used_quota: used } = result.data;
+  if (![quota, used, quota + used].every(Number.isSafeInteger) || used < 0) throw new Error("额度字段缺失或格式无效");
+  return { remaining: quota, used, unit: await getUnit(account, jar) };
+}
+
+function quotaMessage(quota) {
+  const money = value => `$${(value / quota.unit).toFixed(2)}`;
+  return `剩余额度: ${money(quota.remaining)}｜已用: ${money(quota.used)}｜总额度: ${money(quota.remaining + quota.used)}`;
+}
+
+function accountMessage(result) {
+  const icon = { success: "✅", repeat: "🟡", failed: "❌" }[result.kind];
+  const balance = result.quota ? quotaMessage(result.quota) : result.quotaError ? `额度查询失败: ${result.quotaError}` : "账户额度: 未获取";
+  return `${icon} 账号 ${result.id}\n${result.message}\n${balance}`;
+}
+
+function totalsMessage(results) {
+  const valid = results.filter(result => result.quota);
+  if (results.length < 2 || !valid.length) return "";
+  const total = valid.reduce((sum, result) => ({ remaining: sum.remaining + result.quota.remaining, used: sum.used + result.quota.used, unit: result.quota.unit }), { remaining: 0, used: 0 });
+  if (![total.remaining, total.used, total.remaining + total.used].every(Number.isSafeInteger)) return "\n\n额度合计失败: 数值超出精确计算范围";
+  const label = valid.length === results.length ? `${valid.length} 个账号合计` : `${valid.length}/${results.length} 个账号合计（已获取额度）`;
+  return `\n\n📊 ${label}\n${quotaMessage(total)}`;
+}
+
+async function signAccount(account, getUnit) {
   const jar = { session: account.session };
   const identity = parseResponse(await api(account, jar, "GET", "/api/user/self"), "账号验证");
   if (identity?.success !== true || identity?.data?.id !== account.id) throw new Error("登录状态无效或用户 ID 不一致，请重新登录抓取");
@@ -207,8 +235,10 @@ async function signAccount(account) {
   }
   if (typeof result.message !== "string") throw new Error("签到响应缺少 message，结果未确认");
   const message = redact(result.message.trim()).slice(0, 180);
-  if (!message || /今日已签到|已经签到|already.*(?:signed|check)/i.test(message)) return { kind: "repeat", message: message || "今日已签到" };
-  return { kind: "success", message };
+  const repeat = !message || /今日已签到|已经签到|already.*(?:signed|check)/i.test(message);
+  const signed = { kind: repeat ? "repeat" : "success", message: message || "今日已签到" };
+  try { return { ...signed, quota: await quotaInfo(account, jar, getUnit) }; }
+  catch (error) { return { ...signed, quotaError: redact(error.message).slice(0, 180) }; }
 }
 
 async function cron() {
@@ -217,14 +247,22 @@ async function cron() {
   secrets.push(...accounts.map(account => account.session));
   // 按账号顺序执行，避免多账号同时触发动态验证或形成突发访问。
   const results = [];
+  let unitPromise;
+  const getUnit = (account, jar) => unitPromise ||= api(account, jar, "GET", "/api/status").then(response => {
+    const result = parseResponse(response, "额度配置");
+    const unit = result?.data?.quota_per_unit;
+    if (result?.success !== true || typeof unit !== "number" || !Number.isFinite(unit) || unit <= 0) throw new Error("额度换算参数缺失或无效");
+    return unit;
+  });
   for (const account of accounts) {
-    try { results.push({ id: account.id, ...await signAccount(account) }); }
+    try { results.push({ id: account.id, ...await signAccount(account, getUnit) }); }
     catch (error) { results.push({ id: account.id, kind: "failed", message: redact(error.message).slice(0, 180) }); }
   }
   const count = kind => results.filter(result => result.kind === kind).length;
-  const summary = `成功 ${count("success")}，重复 ${count("repeat")}，失败 ${count("failed")}`;
-  const text = results.map(result => `账号 ${result.id}：${result.message}`).join("\n");
-  notify("AnyRouter 自动签到", summary, text);
+  const summary = `成功 ${count("success")}，已签到 ${count("repeat")}，失败 ${count("failed")}`;
+  const state = count("failed") === results.length ? "签到失败" : count("success") === results.length ? "签到成功" : "签到完成";
+  const text = results.map(accountMessage).join("\n\n") + totalsMessage(results);
+  notify(`[AnyRouter] ${state}（${results.length} 个账号）`, summary, text);
 }
 
 (async () => {

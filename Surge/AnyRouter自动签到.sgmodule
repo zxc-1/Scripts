@@ -1,11 +1,11 @@
 #!name=AnyRouter 自动签到
-#!desc=验证登录后保存 session、原始 UA 与用户 ID，本地处理动态验证，每日签到并通过 Surge 本地通知显示结果
+#!desc=验证登录后保存 session、原始 UA 与用户 ID，本地处理动态验证，每日签到并通知剩余额度、已用额度及多账号合计
 
 [Script]
-# 每天 09:10，使用设备本地时区；北京时间 08:00 后运行。Surge iOS 5.9+ / Mac 5.5+。
-# 总超时参考值：10 账号 × 2 接口 × 最多 3 次请求 × 4 秒 = 240 秒，再留 25% 执行余量。
-# timeout=300 是可调整的项目配置；官方未公布硬性最大值。脚本完成后立即退出。
-AnyRouter_Checkin = type=cron,cronexp="30 9 * * *",script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/anyrouter.surge.js,timeout=300,wake-system=true
+# 每天 09:30，使用设备本地时区；北京时间 08:00 后运行。Surge iOS 5.9+ / Mac 5.5+。
+# 总超时参考值：(10 账号 × 3 接口 + 1 次共享额度配置) × 最多 3 次请求 × 4 秒 = 372 秒，再留 25% 执行余量。
+# timeout=465 是可调整的项目配置；官方未公布硬性最大值。脚本完成后立即退出。
+AnyRouter_Checkin = type=cron,cronexp="30 9 * * *",script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/anyrouter.surge.js,timeout=465,wake-system=true
 AnyRouter_Capture = type=http-response,pattern=^https:\/\/anyrouter\.top\/api\/user\/self(?:\?.*)?$,requires-body=true,script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/anyrouter.surge.js
 
 [MITM]
