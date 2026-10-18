@@ -1,5 +1,5 @@
 #!name=AnyRouter 自动签到
-#!desc=验证登录后保存 session、原始 UA 与用户 ID，本地处理动态验证，每日签到，可选 Telegram
+#!desc=验证登录后保存 session、原始 UA 与用户 ID，本地处理动态验证，每日签到并通过 Surge 本地通知显示结果
 
 [Script]
 # 每天 09:10，使用设备本地时区；北京时间 08:00 后运行。Surge iOS 5.9+ / Mac 5.5+。

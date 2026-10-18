@@ -1,5 +1,5 @@
 #!name=GLaDOS 自动签到
-#!desc=验证已登录的账号状态后保存 Cookie 与 User-Agent，定时签到并可选推送到 Telegram
+#!desc=验证已登录的账号状态后保存 Cookie 与 User-Agent，定时签到并通过 Surge 本地通知显示结果
 #!system=ios
 
 [Script]

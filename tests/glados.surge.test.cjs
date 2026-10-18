@@ -251,28 +251,15 @@ test('successful result counts come from the API code rather than translated mes
   assert.match(result.text, /成功 1，重复 0，失败 0/);
 });
 
-test('Telegram sends plain text so upstream errors cannot turn into HTML markup', async () => {
-  const result = await runScript({ store: { ...storedSession, TG_BOT_TOKEN: '123:synthetic-token', TG_CHAT_ID: 'synthetic-chat' }, reply: ({ request }) => ({ status: 200, body: request.url.includes('api.telegram.org') ? { ok: true, result: {} } : '<html>Challenge & retry</html>' }) });
-  const telegram = result.requests.find(r => r.url.includes('api.telegram.org'));
-  assert.ok(telegram);
-  const body = JSON.parse(telegram.body);
-  assert.equal(body.parse_mode, undefined);
-  assert.match(body.text, /<html>Challenge & retry<\/html>/);
-  assert.match(result.text, /失败 1/);
-});
-
-test('Telegram failures are visible without hiding the checkin result or leaking the bot token', async () => {
-  const failures = [
-    { status: 400, body: { ok: false, description: 'Bad Request: chat not found' } },
-    { status: 200, body: { ok: false, description: 'Bot request rejected' } },
-    { status: 0, error: 'POST https://api.telegram.org/bot123:synthetic-token/sendMessage failed' },
-    { status: 200, body: '<html>Proxy error</html>' },
-  ];
-  for (const failure of failures) {
-    const result = await runScript({ store: { ...storedSession, TG_BOT_TOKEN: '123:synthetic-token', TG_CHAT_ID: 'synthetic-chat' }, reply: ({ request, isCheckin }) => request.url.includes('api.telegram.org') ? failure : { status: 200, body: isCheckin ? successBody : statusBody } });
+test('legacy Telegram settings never send a push or change the local checkin result', async () => {
+  for (const settings of [{ TG_BOT_TOKEN: '123:synthetic-token', TG_CHAT_ID: 'synthetic-chat' }, { TG_BOT_TOKEN: '123:synthetic-token' }, { TG_CHAT_ID: 'synthetic-chat' }]) {
+    const store = { ...storedSession, ...settings };
+    const result = await runScript({ store });
+    assert.deepEqual(result.requests.map(request => request.url), ['https://glados.network/api/user/checkin', 'https://glados.network/api/user/status']);
     assert.match(result.text, /成功 1，重复 0，失败 0/);
-    assert.match(result.text, /Telegram 推送失败/);
-    assert.doesNotMatch(result.text, /synthetic-token|脚本运行失败/);
+    assert.doesNotMatch(result.text, /Telegram|synthetic-token/);
+    assert.equal(result.notifications.length, 1);
+    assert.deepEqual(result.values, store);
   }
 });
 

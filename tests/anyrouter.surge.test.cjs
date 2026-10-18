@@ -30,7 +30,7 @@ async function run(options = {}) {
     requests.push({ method, ...req });
     const reply = options.reply ? options.reply({ method, request: req, index: requests.length - 1 }) : {
       status: 200,
-      body: req.url.includes('api.telegram.org') ? { ok: true } : req.url.endsWith('/api/user/self') ? authBody(Number(req.headers['New-API-User'])) : OK,
+      body: req.url.endsWith('/api/user/self') ? authBody(Number(req.headers['New-API-User'])) : OK,
     };
     if (options.elapseMs) now += Math.min(options.elapseMs, (req.timeout || 4) * 1000);
     queueMicrotask(() => callback(reply.error || null, { status: reply.status, headers: reply.headers || {} }, typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body)));
@@ -288,42 +288,24 @@ test('empty, malformed or excessive account configuration never sends a request'
   }
 });
 
-test('optional Telegram uses plain text and checks the actual API ok field', async () => {
-  const token = '123456:test-bot-token';
-  const r = await run({ store: { ...stored(), TG_BOT_TOKEN: token, TG_CHAT_ID: '-1234' } });
-  const telegram = r.requests.find(req => req.url.startsWith('https://api.telegram.org/'));
-  assert.ok(telegram);
-  assert.equal(telegram['auto-redirect'], false);
-  assert.equal(telegram['auto-cookie'], false);
-  const body = JSON.parse(telegram.body);
-  assert.equal(body.chat_id, '-1234');
-  assert.equal(body.parse_mode, undefined);
-  assert.match(body.text, /成功 1/);
-  assert.equal(r.notifications.length, 1);
-});
-
-test('Telegram business or transport failures stay visible without changing a completed check-in', async () => {
-  const token = '123456:test-bot-token';
-  for (const response of [{ status: 200, body: { ok: false, description: token } }, { error: `network failure at https://api.telegram.org/bot${token}/sendMessage` }]) {
-    const r = await run({ store: { ...stored(), TG_BOT_TOKEN: token, TG_CHAT_ID: '-1234' }, reply: ({ request: req }) => req.url.includes('api.telegram.org') ? response : { status: 200, body: req.url.endsWith('/self') ? authBody(123) : OK } });
+test('legacy Telegram settings never send a push or change the local check-in result', async () => {
+  for (const settings of [{ TG_BOT_TOKEN: '123456:test-bot-token', TG_CHAT_ID: '-1234' }, { TG_BOT_TOKEN: '123456:test-bot-token' }, { TG_CHAT_ID: '-1234' }]) {
+    const store = { ...stored(), ...settings };
+    const r = await run({ store });
+    assert.deepEqual(r.requests.map(req => req.url), [`${BASE}/api/user/self`, `${BASE}/api/user/sign_in`]);
     assert.match(r.text, /成功 1，重复 0，失败 0/);
-    assert.match(r.text, /Telegram.*失败/);
-    assert.equal(r.text.includes(token), false);
+    assert.doesNotMatch(r.text, /Telegram|test-bot-token/);
+    assert.equal(r.notifications.length, 1);
+    assert.deepEqual(r.values, store);
   }
 });
 
-test('incomplete Telegram settings cause no request to Telegram and show the configuration error', async () => {
-  const r = await run({ store: { ...stored(), TG_BOT_TOKEN: '123456:test-bot-token' } });
-  assert.equal(r.requests.length, 2);
-  assert.match(r.text, /Telegram.*配置/);
-});
-
-test('notifications and Telegram payloads redact stored session and bot token from business text', async () => {
-  const token = '123456:test-bot-token';
-  const r = await run({ store: { ...stored(), TG_BOT_TOKEN: token, TG_CHAT_ID: '-1234' }, reply: ({ request: req }) => ({ status: 200, body: req.url.includes('api.telegram.org') ? { ok: true } : req.url.endsWith('/self') ? authBody(123) : { success: false, message: `denied session=${SESSION}; token=${token}` } }) });
-  const visible = r.text + r.logs.join('\n') + r.requests.filter(req => req.url.includes('api.telegram.org')).map(req => req.body).join('\n');
+test('local notifications redact the stored session while preserving unrelated business text', async () => {
+  const r = await run({ store: stored(), reply: ({ request: req }) => ({ status: 200, body: req.url.endsWith('/self') ? authBody(123) : { success: false, message: `denied session=${SESSION}; reference=123456:request-id` } }) });
+  const visible = r.text + r.logs.join('\n');
   assert.equal(visible.includes(SESSION), false);
-  assert.equal(visible.includes(token), false);
+  assert.match(r.text, /reference=123456:request-id/);
+  assert.match(r.text, /成功 0，重复 0，失败 1/);
 });
 
 test('module matches only authenticated self responses and schedules one daily run', () => {
@@ -347,14 +329,14 @@ test('module matches only authenticated self responses and schedules one daily r
 });
 
 
-test('slow accounts respect a shared time budget and report unprocessed accounts explicitly', async () => {
-  const accounts = Array.from({ length: 10 }, (_, index) => ({ ...ACCOUNT, id: index + 1, session: `synthetic-session-${index + 1}` }));
+test('slow accounts continue beyond 45 seconds while retaining the configured request timeout', async () => {
+  const accounts = Array.from({ length: 7 }, (_, index) => ({ ...ACCOUNT, id: index + 1, session: `synthetic-session-${index + 1}` }));
   const r = await run({ store: stored(accounts), now: 0, elapseMs: 4000 });
-  assert.ok(r.now <= 45000, `request budget exceeded: ${r.now} ms`);
-  assert.ok(r.requests.length < 20, 'stop before starting requests that exceed the module budget');
-  assert.match(r.text, /时间预算.*未发送|未发送.*时间预算/);
-  assert.match(r.text, /失败 [1-9]/);
-  assert.equal(r.requests.at(-1).timeout, 1, 'shorten the last request timeout to the remaining budget');
+  assert.equal(r.requests.length, 14);
+  assert.equal(r.now, 56000);
+  assert.ok(r.requests.every(req => req.timeout === 4));
+  assert.match(r.text, /成功 7，重复 0，失败 0/);
+  assert.doesNotMatch(r.text, /时间预算|未发送/);
 });
 
 test('accounts are checked sequentially to avoid bursts against the WAF', async () => {

@@ -4,7 +4,6 @@
  * 单账号: GLADOS_COOKIE / GLADOS_USER_AGENT / GLADOS_API_BASE / GLADOS_EMAIL（可选）
  * 多账号: GLADOS_EMAIL_1 / GLADOS_COOKIE_1 / GLADOS_USER_AGENT_1（依次编号，优先于自动抓取的单账号）
  * 批量: GLADOS_EMAILS / GLADOS_COOKIES（逗号分隔），每个账号配置 GLADOS_USER_AGENT_1 等。
- * Telegram（可选）: TG_BOT_TOKEN / TG_CHAT_ID
  */
 
 const DEFAULT_API_BASES = ["https://glados.network"];
@@ -249,36 +248,6 @@ async function signOnce(email, cookie, userAgent) {
   return { ok: false, email: email || "(未提供邮箱)", message: `请求异常：${lastErr || "unknown"}`, leftDays: "error", apiBase: "-" };
 }
 
-async function sendTelegram(summaryText) {
-  const token = Store.read("TG_BOT_TOKEN");
-  const chatId = Store.read("TG_CHAT_ID");
-  if (!token || !chatId) return;
-
-  const url = `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`;
-  const body = {
-    chat_id: chatId,
-    text: summaryText,
-  };
-
-  return new Promise((resolve, reject) => {
-    $httpClient.post(
-      {
-        url,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-      (err, resp, data) => {
-        if (err) return reject(new Error("Telegram 网络请求失败，请检查网络与代理"));
-        try {
-          const reply = parseResponse({ status: resp?.status || resp?.statusCode, body: data }, "Telegram");
-          if (reply?.ok !== true) throw new Error(`Telegram 拒绝推送: ${reply?.description || "未知响应"}`);
-          resolve();
-        } catch (e) { reject(e); }
-      }
-    );
-  });
-}
-
 async function runCheckin() {
   const accounts = parseAccounts();
 
@@ -311,22 +280,6 @@ async function runCheckin() {
   const subtitle = `成功 ${success}，重复 ${repeats}，失败 ${failed}`;
 
   $notification.post(title, subtitle, lines.join("\n"));
-
-  const tgText = [
-    `当前时间: ${nowStr()}`,
-    "",
-    "GLaDOS 签到结果：",
-    ...results.map((r) => `- ${r.email}: ${r.message}`),
-    "",
-    "账号状态：",
-    ...results.map((r) => `- ${r.email}: 剩余 ${r.leftDays} 天（${r.apiBase}）`),
-  ].join("\n");
-
-  try {
-    await sendTelegram(tgText);
-  } catch (e) {
-    $notification.post("GLaDOS Telegram 推送失败", "签到结果见本地通知", String(e));
-  }
 
   $done();
 }

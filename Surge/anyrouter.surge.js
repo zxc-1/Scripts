@@ -2,14 +2,13 @@
  * AnyRouter 自动签到 + 会话获取（Surge 一体版）
  * 登录并打开个人设置后，验证 /api/user/self 的响应再保存账号。
  * ANYROUTER_ACCOUNTS：一个 JSON 记录，按已验证的用户 ID 保存 session 与原始 UA。
- * Telegram（可选）：TG_BOT_TOKEN / TG_CHAT_ID。使用 Surge iOS 5.9+ / Mac 5.5+。
+ * 使用 Surge iOS 5.9+ / Mac 5.5+。
  */
 
 const BASE = "https://anyrouter.top";
 const ACCOUNTS_KEY = "ANYROUTER_ACCOUNTS";
 const MAX_ACCOUNTS = 10;
 const REQUEST_TIMEOUT = 4;
-const RUN_BUDGET_MS = 45000;
 const WAF_MASK = "3000176000856006061501533003690027800375";
 const WAF_PERMUTATION = [
   15, 35, 29, 24, 33, 16, 1, 38, 10, 9, 19, 31, 40, 27, 22, 23,
@@ -25,7 +24,6 @@ function redact(value) {
     for (const variant of [secret, encodeURIComponent(secret)]) text = text.split(variant).join("[已隐藏]");
   }
   return text.replace(/session\s*=\s*[^;\s]+/gi, "session=[已隐藏]")
-    .replace(/\b\d+:[A-Za-z0-9_-]{8,}\b/g, "[已隐藏]")
     .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, " ");
 }
 
@@ -117,14 +115,12 @@ function capture() {
   notify("AnyRouter CK 获取成功", `账号 ${id}`, "已验证登录并保存 session、User-Agent 和用户 ID");
 }
 
-function http(method, url, headers, body, deadline = Infinity) {
-  const timeout = Math.min(REQUEST_TIMEOUT, Math.floor((deadline - Date.now()) / 1000));
-  if (timeout < 1) return Promise.reject(new Error("时间预算已用尽，本次请求未发送，请分批运行"));
+function http(method, url, headers) {
   const options = {
-    url, headers, timeout,
+    url, headers, timeout: REQUEST_TIMEOUT,
     "auto-cookie": false, "auto-redirect": false, "full-header-mode": true,
   };
-  if (method === "POST") options.body = body ?? "";
+  if (method === "POST") options.body = "";
   return new Promise((resolve, reject) => {
     $httpClient[method.toLowerCase()](options, (error, response, data) => {
       if (error) return reject(new Error("网络请求失败或超时，结果未确认"));
@@ -178,7 +174,7 @@ function mergeCookies(jar, headers) {
   }
 }
 
-async function api(account, jar, method, path, deadline) {
+async function api(account, jar, method, path) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (!validSession(jar.session)) throw new Error("服务端已清除登录 session，请重新登录抓取");
     const headers = {
@@ -191,7 +187,7 @@ async function api(account, jar, method, path, deadline) {
       headers["Content-Type"] = "application/json";
       headers.Origin = BASE;
     }
-    const response = await http(method, `${BASE}${path}`, headers, undefined, deadline);
+    const response = await http(method, `${BASE}${path}`, headers);
     mergeCookies(jar, response.headers);
     const challenge = [200, 403].includes(response.status) && /<script\b/i.test(response.body) && response.body.includes("acw_sc__v2");
     if (!challenge) return response;
@@ -200,11 +196,11 @@ async function api(account, jar, method, path, deadline) {
   }
 }
 
-async function signAccount(account, deadline) {
+async function signAccount(account) {
   const jar = { session: account.session };
-  const identity = parseResponse(await api(account, jar, "GET", "/api/user/self", deadline), "账号验证");
+  const identity = parseResponse(await api(account, jar, "GET", "/api/user/self"), "账号验证");
   if (identity?.success !== true || identity?.data?.id !== account.id) throw new Error("登录状态无效或用户 ID 不一致，请重新登录抓取");
-  const result = parseResponse(await api(account, jar, "POST", "/api/user/sign_in", deadline), "签到");
+  const result = parseResponse(await api(account, jar, "POST", "/api/user/sign_in"), "签到");
   if (result?.success !== true) {
     const message = typeof result?.message === "string" ? `：${redact(result.message).slice(0, 180)}` : "";
     throw new Error(`签到未成功${message}`);
@@ -215,39 +211,20 @@ async function signAccount(account, deadline) {
   return { kind: "success", message };
 }
 
-async function telegram(text) {
-  const token = String($persistentStore.read("TG_BOT_TOKEN") || "").trim();
-  const chatId = String($persistentStore.read("TG_CHAT_ID") || "").trim();
-  if (token) secrets.push(token);
-  if (!token && !chatId) return "";
-  if (!/^[0-9]+:[A-Za-z0-9_-]+$/.test(token) || !chatId) return "Telegram 配置不完整或 Token 格式无效";
-  try {
-    const response = await http("POST", `https://api.telegram.org/bot${token}/sendMessage`, {
-      "Content-Type": "application/json",
-    }, JSON.stringify({ chat_id: chatId, text: redact(text), disable_web_page_preview: true }));
-    if (parseResponse(response, "Telegram")?.ok !== true) return "Telegram 推送失败：API 未确认成功";
-    return "";
-  } catch (error) { return "Telegram 推送失败：网络、HTTP 或 JSON 错误"; }
-}
-
 async function cron() {
-  const deadline = Date.now() + RUN_BUDGET_MS;
   const accounts = readAccounts();
   if (!accounts.length) throw new Error("没有已保存账号，请在 Surge 生效的设备上登录并打开个人设置");
   secrets.push(...accounts.map(account => account.session));
-  const token = $persistentStore.read("TG_BOT_TOKEN");
-  if (token) secrets.push(String(token).trim());
   // 按账号顺序执行，避免多账号同时触发动态验证或形成突发访问。
   const results = [];
   for (const account of accounts) {
-    try { results.push({ id: account.id, ...await signAccount(account, deadline) }); }
+    try { results.push({ id: account.id, ...await signAccount(account) }); }
     catch (error) { results.push({ id: account.id, kind: "failed", message: redact(error.message).slice(0, 180) }); }
   }
   const count = kind => results.filter(result => result.kind === kind).length;
   const summary = `成功 ${count("success")}，重复 ${count("repeat")}，失败 ${count("failed")}`;
   const text = results.map(result => `账号 ${result.id}：${result.message}`).join("\n");
-  const tgError = await telegram(`AnyRouter 签到\n${summary}\n${text}`);
-  notify("AnyRouter 自动签到", summary, `${text}${tgError ? `\n${tgError}` : ""}`);
+  notify("AnyRouter 自动签到", summary, text);
 }
 
 (async () => {
