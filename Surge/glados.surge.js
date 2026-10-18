@@ -1,6 +1,6 @@
 /**
  * GLaDOS 自动签到 + Cookie / User-Agent 获取（Surge 一体版）
- * 更新后在 Surge 已启用 HTTPS 解密的设备上重新登录并刷新控制台，重新抓取会话。
+ * 同时更新脚本与模块；在 Surge 已启用 HTTPS 解密的设备上登录并刷新控制台，验证登录后保存会话。
  * 单账号: GLADOS_COOKIE / GLADOS_USER_AGENT / GLADOS_API_BASE / GLADOS_EMAIL（可选）
  * 多账号: GLADOS_EMAIL_1 / GLADOS_COOKIE_1 / GLADOS_USER_AGENT_1（依次编号，优先于自动抓取的单账号）
  * 批量: GLADOS_EMAILS / GLADOS_COOKIES（逗号分隔），每个账号配置 GLADOS_USER_AGENT_1 等。
@@ -120,17 +120,32 @@ function requestHeader(name) {
   return key ? headers[key] : "";
 }
 
-function captureCookieFromRequest() {
+function hasAuthenticatedStatusResponse() {
+  if (typeof $response === "undefined") return false;
+  try {
+    const result = parseResponse($response, "Status");
+    return result?.code === 0 && typeof result.data?.email === "string" && !!result.data.email.trim();
+  } catch (e) {
+    // 未登录、错误或不完整的响应直接放行，不保存候选 Cookie。
+    return false;
+  }
+}
+
+function captureCookieFromResponse() {
   const url = $request.url || "";
+  const m = url.match(/^https:\/\/(glados\.(?:network|cloud|one))\/api\/user\/status(?:\?.*)?$/i);
+  if (!m || !hasAuthenticatedStatusResponse()) {
+    $done({});
+    return;
+  }
   const cookie = normalizeCookie(requestHeader("Cookie"));
   const userAgent = String(requestHeader("User-Agent") || "").trim();
   if (!cookie || !userAgent) {
     $done({});
     return;
   }
-  const m = url.match(/^https:\/\/([^/]+)/i);
-  const host = m ? m[1] : "";
-  const apiBase = host ? `https://${host}` : "";
+  const host = m[1].toLowerCase();
+  const apiBase = `https://${host}`;
   if (sameCookie(Store.read("GLADOS_COOKIE"), cookie) &&
       userAgentFor() === userAgent && Store.read("GLADOS_API_BASE") === apiBase) {
     $done({});
@@ -144,7 +159,7 @@ function captureCookieFromRequest() {
       if (!Store.write(value, key)) throw new Error("保存失败");
       written.push([key, previous]);
     }
-    $notification.post("GLaDOS CK 获取成功", host || "未知域名", "已保存 Cookie、User-Agent 和 API 域名");
+    $notification.post("GLaDOS CK 获取成功", host || "未知域名", "已验证登录并保存 Cookie、User-Agent 和 API 域名");
   } catch (e) {
     let restored = true;
     for (const [key, previous] of written.reverse()) {
@@ -318,11 +333,11 @@ async function runCheckin() {
 
 /**
  * 主入口
- * - 有 $request：抓 CK
+ * - 有 $request：验证 status 响应中的登录状态后抓 CK
  * - 没有 $request：执行签到
  */
 if (typeof $request !== "undefined") {
-  captureCookieFromRequest();
+  captureCookieFromResponse();
 } else {
   runCheckin().catch((e) => {
     $notification.post("GLaDOS 签到异常", "脚本运行失败", String(e));
