@@ -233,11 +233,12 @@ async function cron() {
   secrets.push(...accounts.map(account => account.session));
   const token = $persistentStore.read("TG_BOT_TOKEN");
   if (token) secrets.push(String(token).trim());
-  // 最多 10 个账号并发，每个账号最多 6 次、每次 4 秒；含 TG 不超过 28 秒请求预算。
-  const results = await Promise.all(accounts.map(async account => {
-    try { return { id: account.id, ...await signAccount(account) }; }
-    catch (error) { return { id: account.id, kind: "failed", message: redact(error.message).slice(0, 180) }; }
-  }));
+  // 按账号顺序执行，避免多账号同时触发动态验证或形成突发访问。
+  const results = [];
+  for (const account of accounts) {
+    try { results.push({ id: account.id, ...await signAccount(account) }); }
+    catch (error) { results.push({ id: account.id, kind: "failed", message: redact(error.message).slice(0, 180) }); }
+  }
   const count = kind => results.filter(result => result.kind === kind).length;
   const summary = `成功 ${count("success")}，重复 ${count("repeat")}，失败 ${count("failed")}`;
   const text = results.map(result => `账号 ${result.id}：${result.message}`).join("\n");
