@@ -2,7 +2,7 @@
  * GLaDOS 自动签到 + Cookie / User-Agent 获取（Surge 一体版）
  * 更新后在 Surge 已启用 HTTPS 解密的设备上重新登录并刷新控制台，重新抓取会话。
  * 单账号: GLADOS_COOKIE / GLADOS_USER_AGENT / GLADOS_API_BASE / GLADOS_EMAIL（可选）
- * 多账号: GLADOS_EMAIL_1 / GLADOS_COOKIE_1 / GLADOS_USER_AGENT_1（依次编号）
+ * 多账号: GLADOS_EMAIL_1 / GLADOS_COOKIE_1 / GLADOS_USER_AGENT_1（依次编号，优先于自动抓取的单账号）
  * 批量: GLADOS_EMAILS / GLADOS_COOKIES（逗号分隔），每个账号配置 GLADOS_USER_AGENT_1 等。
  * Telegram（可选）: TG_BOT_TOKEN / TG_CHAT_ID
  */
@@ -109,6 +109,11 @@ function normalizeCookie(cookie) {
     .trim();
 }
 
+function sameCookie(left, right) {
+  const parts = (cookie) => normalizeCookie(cookie).split("; ").filter(Boolean).sort().join("; ");
+  return parts(left) === parts(right);
+}
+
 function requestHeader(name) {
   const headers = $request.headers || {};
   const key = Object.keys(headers).find((k) => k.toLowerCase() === name.toLowerCase());
@@ -120,26 +125,39 @@ function captureCookieFromRequest() {
   const cookie = normalizeCookie(requestHeader("Cookie"));
   const userAgent = String(requestHeader("User-Agent") || "").trim();
   if (!cookie || !userAgent) {
-    $notification.post("GLaDOS CK 获取失败", "缺少 Cookie 或 User-Agent", "请重新登录并刷新控制台，原配置保持不变");
     $done({});
     return;
   }
   const m = url.match(/^https:\/\/([^/]+)/i);
   const host = m ? m[1] : "";
   const apiBase = host ? `https://${host}` : "";
-  Store.write(cookie, "GLADOS_COOKIE");
-  Store.write(userAgent, "GLADOS_USER_AGENT");
-  if (apiBase) Store.write(apiBase, "GLADOS_API_BASE");
-  $notification.post("GLaDOS CK 获取成功", host || "未知域名", "已保存 Cookie、User-Agent 和 API 域名");
+  if (sameCookie(Store.read("GLADOS_COOKIE"), cookie) &&
+      userAgentFor() === userAgent && Store.read("GLADOS_API_BASE") === apiBase) {
+    $done({});
+    return;
+  }
+  const updates = [["GLADOS_COOKIE", cookie], ["GLADOS_USER_AGENT", userAgent], ["GLADOS_API_BASE", apiBase]];
+  const written = [];
+  try {
+    for (const [key, value] of updates) {
+      const previous = Store.read(key);
+      if (!Store.write(value, key)) throw new Error("保存失败");
+      written.push([key, previous]);
+    }
+    $notification.post("GLaDOS CK 获取成功", host || "未知域名", "已保存 Cookie、User-Agent 和 API 域名");
+  } catch (e) {
+    let restored = true;
+    for (const [key, previous] of written.reverse()) {
+      try { if (!Store.write(previous ?? "", key)) restored = false; }
+      catch (e) { restored = false; }
+    }
+    $notification.post("GLaDOS CK 获取失败", "配置保存失败", restored
+      ? "原会话已保留，请检查持久化存储后重试" : "配置未完整恢复，请检查持久化存储并重新抓取");
+  }
   $done({});
 }
 
 function parseAccounts() {
-  const single = Store.read("GLADOS_COOKIE");
-  if (single) {
-    return [{ email: Store.read("GLADOS_EMAIL") || "", cookie: single, userAgent: userAgentFor() }];
-  }
-
   const emailsBulk = (Store.read("GLADOS_EMAILS") || "")
     .split(",")
     .map((s) => s.trim())
@@ -150,7 +168,10 @@ function parseAccounts() {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  if (emailsBulk.length && emailsBulk.length === cookiesBulk.length) {
+  if (emailsBulk.length || cookiesBulk.length) {
+    if (!emailsBulk.length || emailsBulk.length !== cookiesBulk.length) {
+      throw new Error("批量账号 GLADOS_EMAILS 与 GLADOS_COOKIES 数量不一致，请检查配置");
+    }
     return emailsBulk.map((e, i) => ({ email: e, cookie: cookiesBulk[i], userAgent: userAgentFor(i + 1) }));
   }
 
@@ -161,7 +182,9 @@ function parseAccounts() {
     if (!c) break;
     acc.push({ email: e || "", cookie: c, userAgent: userAgentFor(i) });
   }
-  return acc;
+  if (acc.length) return acc;
+  const single = Store.read("GLADOS_COOKIE");
+  return single ? [{ email: Store.read("GLADOS_EMAIL") || "", cookie: single, userAgent: userAgentFor() }] : [];
 }
 
 function parseResponse(response, label) {
@@ -203,7 +226,7 @@ async function signOnce(email, cookie, userAgent) {
       }
       const leftDaysRaw = j2.data.leftDays;
       const left = typeof leftDaysRaw === "number" ? String(leftDaysRaw) : String(leftDaysRaw || "未知");
-      return { ok: true, email: email || j2.data.email || "(未提供邮箱)", message: msg, leftDays: left, apiBase };
+      return { ok: true, repeated: j1.code === 1, email: email || j2.data.email || "(未提供邮箱)", message: msg, leftDays: left, apiBase };
     } catch (e) {
       lastErr = `${apiBase} -> ${e}`;
     }
@@ -220,17 +243,23 @@ async function sendTelegram(summaryText) {
   const body = {
     chat_id: chatId,
     text: summaryText,
-    parse_mode: "HTML",
   };
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     $httpClient.post(
       {
         url,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       },
-      () => resolve()
+      (err, resp, data) => {
+        if (err) return reject(new Error("Telegram 网络请求失败，请检查网络与代理"));
+        try {
+          const reply = parseResponse({ status: resp?.status || resp?.statusCode, body: data }, "Telegram");
+          if (reply?.ok !== true) throw new Error(`Telegram 拒绝推送: ${reply?.description || "未知响应"}`);
+          resolve();
+        } catch (e) { reject(e); }
+      }
     );
   });
 }
@@ -255,9 +284,9 @@ async function runCheckin() {
     results.push(await signOnce(email, normalizeCookie(cookie), userAgent));
   }
 
-  const success = results.filter((r) => r.ok && r.message.includes("成功")).length;
-  const repeats = results.filter((r) => r.ok && r.message.includes("重复")).length;
-  const failed = results.filter((r) => !r.ok || r.message.includes("失败") || r.message.includes("异常")).length;
+  const success = results.filter((r) => r.ok && !r.repeated).length;
+  const repeats = results.filter((r) => r.ok && r.repeated).length;
+  const failed = results.filter((r) => !r.ok).length;
 
   const lines = results.map(
     (r) => `• ${r.email} | ${r.message} | 剩余: ${r.leftDays} 天 | ${r.apiBase}`
@@ -278,7 +307,11 @@ async function runCheckin() {
     ...results.map((r) => `- ${r.email}: 剩余 ${r.leftDays} 天（${r.apiBase}）`),
   ].join("\n");
 
-  await sendTelegram(tgText);
+  try {
+    await sendTelegram(tgText);
+  } catch (e) {
+    $notification.post("GLaDOS Telegram 推送失败", "签到结果见本地通知", String(e));
+  }
 
   $done();
 }
