@@ -12,6 +12,7 @@ const WINDOWS_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const COOKIE = 'gld:sess=test-session; gld:sess.sig=test-signature';
 const storedSession = { GLADOS_COOKIE: COOKIE, GLADOS_USER_AGENT: MAC_UA, GLADOS_API_BASE: 'https://glados.network' };
 const statusBody = { code: 0, data: { email: 'test@example.com', leftDays: 342 } };
+const unauthenticatedStatusBody = { code: -2, message: '没有权限' };
 const successBody = { code: 0, points: 10, message: 'Checkin! Got 10 Points', streak: 1, list: [] };
 const repeatBody = { code: 1, points: 0, message: "Today's observation logged. Return tomorrow for more points.", streak: 1, list: [] };
 const mismatchBody = { code: 4, reason: 'device-mismatch', points: 0, loginDevice: 'macOS', currentDevice: 'Windows', message: 'Automated check-in detected. Please sign in again to continue.', list: [] };
@@ -22,6 +23,7 @@ async function runScript(options = {}) {
   const writes = [];
   const notifications = [];
   let doneCalls = 0;
+  const doneResults = [];
   let finish;
   const complete = new Promise(resolve => { finish = resolve; });
   const respond = (method, request, callback) => {
@@ -38,15 +40,19 @@ async function runScript(options = {}) {
     $persistentStore: { read: key => values[key] ?? null, write: (value, key) => { writes.push({ key, value }); if (options.failWriteKey === key) return false; values[key] = value; return true; } },
     $httpClient: { get: (request, cb) => respond('GET', request, cb), post: (request, cb) => respond('POST', request, cb) },
     $notification: { post: (...args) => notifications.push(args) },
-    $done: () => { doneCalls++; finish(); },
+    $done: result => { doneCalls++; doneResults.push(result); finish(); },
     setTimeout: callback => { queueMicrotask(callback); return 0; },
     console,
   };
-  if (options.request) context.$request = options.request;
+  if (options.request) {
+    context.$request = options.request;
+    const response = options.response === undefined ? { status: 200, body: statusBody } : options.response;
+    if (response) context.$response = { ...response, body: typeof response.body === 'string' ? response.body : JSON.stringify(response.body) };
+  }
   vm.runInNewContext(source, context, { filename: scriptPath, timeout: 1000 });
   await complete;
   assert.equal(doneCalls, 1, '$done must be called exactly once');
-  return { values, requests, writes, notifications, text: notifications.flat().join('\n') };
+  return { values, requests, writes, notifications, doneResults, text: notifications.flat().join('\n') };
 }
 
 test('capture preserves the actual login User-Agent alongside the cookie', async () => {
@@ -143,13 +149,17 @@ test('bulk accounts can specify each device with the same indexed keys', async (
   assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, WINDOWS_UA, WINDOWS_UA]);
 });
 
-test('the Surge module captures the current API host and appends MITM hosts', () => {
+test('the Surge module validates status responses on the supported API hosts and appends MITM hosts', () => {
   const module = fs.readFileSync(modulePath, 'utf8');
   const capture = module.split('\n').find(line => line.startsWith('GLaDOS_Capture'));
+  assert.match(capture, /type=http-response(?:,|$)/);
+  assert.match(capture, /requires-body=(?:true|1)(?:,|$)/);
   const pattern = new RegExp(capture.match(/pattern=([^,]+)/)[1]);
   for (const host of ['glados.network', 'glados.cloud', 'glados.one']) {
     assert.equal(pattern.test(`https://${host}/api/user/status`), true, host);
-    assert.equal(pattern.test(`https://${host}/api/user/checkin`), true, host);
+    assert.equal(pattern.test(`https://${host}/api/user/status?source=console`), true, host);
+    assert.equal(pattern.test(`https://${host}/api/user/checkin`), false, host);
+    assert.equal(pattern.test(`https://${host}/api/user/status/anything`), false, host);
   }
   assert.equal(pattern.test('https://glados.network.evil.test/api/user/status'), false);
   assert.match(module, /hostname\s*=\s*%APPEND%.*glados\.network/);
@@ -264,4 +274,84 @@ test('Telegram failures are visible without hiding the checkin result or leaking
     assert.match(result.text, /Telegram 推送失败/);
     assert.doesNotMatch(result.text, /synthetic-token|脚本运行失败/);
   }
+});
+
+
+test('an unauthenticated status response with analytics cookies is never captured', async () => {
+  for (const store of [{}, storedSession]) {
+    const result = await runScript({ store, request: { url: 'https://glados.network/api/user/status', headers: { Cookie: '_ga=anonymous; _gid=tracking', 'User-Agent': MAC_UA } }, response: { status: 200, body: unauthenticatedStatusBody } });
+    assert.deepEqual(result.values, store);
+    assert.equal(result.writes.length, 0);
+    assert.equal(result.notifications.length, 0);
+    assert.equal(result.requests.length, 0);
+    assert.equal(JSON.stringify(result.doneResults), '[{}]', 'the website response must pass through untouched');
+  }
+});
+
+test('a rejected or expired session never replaces the previously saved account', async () => {
+  const result = await runScript({ store: storedSession, request: { url: 'https://glados.network/api/user/status', headers: { Cookie: 'gld:sess=expired; gld:sess.sig=expired-signature', 'User-Agent': WINDOWS_UA } }, response: { status: 200, body: unauthenticatedStatusBody } });
+  assert.deepEqual(result.values, storedSession);
+  assert.equal(result.writes.length, 0);
+  assert.equal(result.notifications.length, 0);
+});
+
+test('a request without a server response cannot claim a successful capture', async () => {
+  const result = await runScript({ request: { url: 'https://glados.network/api/user/status', headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } }, response: null });
+  assert.deepEqual(result.values, {});
+  assert.equal(result.writes.length, 0);
+  assert.equal(result.notifications.length, 0);
+  assert.equal(result.requests.length, 0);
+});
+
+test('HTTP errors, invalid JSON and status bodies without an authenticated account are ignored', async () => {
+  const responses = [
+    { status: 401, body: statusBody },
+    { status: 403, body: statusBody },
+    { status: 302, body: statusBody },
+    { status: 200, body: '<html>Please log in</html>' },
+    { status: 200, body: '' },
+    { status: 200, body: 'null' },
+    { status: 200, body: { code: 0, data: {} } },
+    { status: 200, body: { code: 0, data: { email: '  ' } } },
+    { status: 200, body: { code: 0, data: { email: 123 } } },
+    { status: 200, body: { code: 0, data: null } },
+    { status: 200, body: { ...statusBody, code: 1 } },
+    { status: 200, body: { ...statusBody, code: '0' } },
+  ];
+  for (const response of responses) {
+    const result = await runScript({ store: storedSession, request: { url: 'https://glados.network/api/user/status', headers: { Cookie: 'candidate-session', 'User-Agent': WINDOWS_UA } }, response });
+    assert.deepEqual(result.values, storedSession);
+    assert.equal(result.writes.length, 0);
+    assert.equal(result.notifications.length, 0);
+    assert.equal(result.requests.length, 0);
+    assert.equal(JSON.stringify(result.doneResults), '[{}]');
+  }
+});
+
+test('even a valid account body is captured only from an exact trusted HTTPS status URL', async () => {
+  for (const url of ['https://glados.network/api/user/checkin', 'https://glados.network/api/user/status/anything', 'https://glados.network.evil.test/api/user/status', 'https://example.com/api/user/status', 'http://glados.network/api/user/status']) {
+    const result = await runScript({ request: { url, headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } }, response: { status: 200, body: statusBody } });
+    assert.deepEqual(result.values, {}, url);
+    assert.equal(result.writes.length, 0, url);
+    assert.equal(result.notifications.length, 0, url);
+  }
+});
+
+test('browsing anonymously, logging in, refreshing and logging out produces one valid capture', async () => {
+  const request = { url: 'https://glados.network/api/user/status?source=console', headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } };
+  const anonymous = await runScript({ request: { ...request, headers: { ...request.headers, Cookie: '_ga=anonymous' } }, response: { status: 200, body: unauthenticatedStatusBody } });
+  assert.deepEqual(anonymous.values, {});
+  assert.equal(anonymous.notifications.length, 0);
+  const loggedIn = await runScript({ store: anonymous.values, request, response: { status: 200, body: statusBody } });
+  assert.equal(loggedIn.notifications.length, 1);
+  assert.equal(loggedIn.values.GLADOS_COOKIE, COOKIE);
+  assert.match(loggedIn.text, /获取成功/);
+  const refreshed = await runScript({ store: loggedIn.values, request, response: { status: 200, body: statusBody } });
+  assert.equal(refreshed.notifications.length, 0);
+  assert.equal(refreshed.writes.length, 0);
+  const loggedOut = await runScript({ store: refreshed.values, request: { ...request, headers: { ...request.headers, Cookie: '_ga=anonymous' } }, response: { status: 200, body: unauthenticatedStatusBody } });
+  assert.deepEqual(loggedOut.values, loggedIn.values);
+  assert.equal(loggedOut.notifications.length, 0);
+  assert.equal(loggedOut.writes.length, 0);
+  assert.equal([anonymous, loggedIn, refreshed, loggedOut].reduce((total, result) => total + result.requests.length, 0), 0);
 });

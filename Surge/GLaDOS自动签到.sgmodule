@@ -1,12 +1,12 @@
 #!name=GLaDOS 自动签到
-#!desc=自动保存登录设备的 Cookie 与 User-Agent，定时签到并可选推送到 Telegram
+#!desc=验证已登录的账号状态后保存 Cookie 与 User-Agent，定时签到并可选推送到 Telegram
 #!system=ios
 
 [Script]
 # 默认每天 09:10 运行（使用设备本地时区，可自行改 cron 表达式）
 GLaDOS_Checkin = type=cron,cronexp="10 9 * * *",script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/glados.surge.js, timeout=60, wake-system=true
-GLaDOS_Capture = type=http-request,pattern=^https:\/\/glados\.(network|cloud|one)\/api\/user\/(status|checkin)(?:[/?]|$),requires-body=0,script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/glados.surge.js
+GLaDOS_Capture = type=http-response,pattern=^https:\/\/glados\.(network|cloud|one)\/api\/user\/status(?:\?.*)?$,requires-body=true,script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/glados.surge.js
 
 [MITM]
-# 抓取 HTTPS 请求需启用 Surge MITM 并信任其证书；更新后重新登录并刷新控制台。
+# 启用 Surge MITM 并信任其证书；同时更新模块与脚本，登录并刷新控制台后才保存会话。
 hostname = %APPEND% glados.network, glados.cloud, glados.one
