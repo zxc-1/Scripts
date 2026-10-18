@@ -24,6 +24,7 @@ async function run(options = {}) {
   const values = { ...options.store };
   const requests = [], writes = [], notifications = [], logs = [], doneResults = [];
   let doneCalls = 0, finish;
+  let now = options.now ?? Date.now();
   const complete = new Promise(resolve => { finish = resolve; });
   const respond = (method, req, callback) => {
     requests.push({ method, ...req });
@@ -31,6 +32,7 @@ async function run(options = {}) {
       status: 200,
       body: req.url.includes('api.telegram.org') ? { ok: true } : req.url.endsWith('/api/user/self') ? authBody(Number(req.headers['New-API-User'])) : OK,
     };
+    if (options.elapseMs) now += Math.min(options.elapseMs, (req.timeout || 4) * 1000);
     queueMicrotask(() => callback(reply.error || null, { status: reply.status, headers: reply.headers || {} }, typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body)));
   };
   const context = {
@@ -43,6 +45,7 @@ async function run(options = {}) {
     $done: value => { doneCalls++; doneResults.push(value); finish(); },
     console: { log: (...args) => logs.push(args.join(' ')) },
   };
+  if (options.elapseMs) context.Date = class extends Date { static now() { return now; } };
   if (options.request) {
     context.$request = options.request;
     const response = options.response === undefined ? { status: 200, body: authBody(123) } : options.response;
@@ -52,7 +55,7 @@ async function run(options = {}) {
   await complete;
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(doneCalls, 1);
-  return { values, requests, writes, notifications, logs, doneResults, text: notifications.flat().join('\n') };
+  return { values, requests, writes, notifications, logs, doneResults, now, text: notifications.flat().join('\n') };
 }
 
 test('authenticated capture atomically saves only the verified account, session and actual UA', async () => {
@@ -341,4 +344,20 @@ test('module matches only authenticated self responses and schedules one daily r
   assert.equal(paths.length, 2);
   assert.equal(paths[0], paths[1]);
   assert.match(paths[0], /^https:\/\/raw\.githubusercontent\.com\/zxc-1\/Scripts\//);
+});
+
+
+test('slow accounts respect a shared time budget and report unprocessed accounts explicitly', async () => {
+  const accounts = Array.from({ length: 10 }, (_, index) => ({ ...ACCOUNT, id: index + 1, session: `synthetic-session-${index + 1}` }));
+  const r = await run({ store: stored(accounts), now: 0, elapseMs: 4000 });
+  assert.ok(r.now <= 45000, `request budget exceeded: ${r.now} ms`);
+  assert.ok(r.requests.length < 20, 'stop before starting requests that exceed the module budget');
+  assert.match(r.text, /时间预算.*未发送|未发送.*时间预算/);
+  assert.match(r.text, /失败 [1-9]/);
+  assert.equal(r.requests.at(-1).timeout, 1, 'shorten the last request timeout to the remaining budget');
+});
+
+test('accounts are checked sequentially to avoid bursts against the WAF', async () => {
+  const r = await run({ store: stored([ACCOUNT, { ...ACCOUNT, id: 456, session: 'other-session' }]) });
+  assert.deepEqual(r.requests.map(req => req.headers['New-API-User']), ['123', '123', '456', '456']);
 });

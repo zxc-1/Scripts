@@ -9,6 +9,7 @@ const BASE = "https://anyrouter.top";
 const ACCOUNTS_KEY = "ANYROUTER_ACCOUNTS";
 const MAX_ACCOUNTS = 10;
 const REQUEST_TIMEOUT = 4;
+const RUN_BUDGET_MS = 45000;
 const WAF_MASK = "3000176000856006061501533003690027800375";
 const WAF_PERMUTATION = [
   15, 35, 29, 24, 33, 16, 1, 38, 10, 9, 19, 31, 40, 27, 22, 23,
@@ -116,9 +117,11 @@ function capture() {
   notify("AnyRouter CK 获取成功", `账号 ${id}`, "已验证登录并保存 session、User-Agent 和用户 ID");
 }
 
-function http(method, url, headers, body) {
+function http(method, url, headers, body, deadline = Infinity) {
+  const timeout = Math.min(REQUEST_TIMEOUT, Math.floor((deadline - Date.now()) / 1000));
+  if (timeout < 1) return Promise.reject(new Error("时间预算已用尽，本次请求未发送，请分批运行"));
   const options = {
-    url, headers, timeout: REQUEST_TIMEOUT,
+    url, headers, timeout,
     "auto-cookie": false, "auto-redirect": false, "full-header-mode": true,
   };
   if (method === "POST") options.body = body ?? "";
@@ -175,7 +178,7 @@ function mergeCookies(jar, headers) {
   }
 }
 
-async function api(account, jar, method, path) {
+async function api(account, jar, method, path, deadline) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (!validSession(jar.session)) throw new Error("服务端已清除登录 session，请重新登录抓取");
     const headers = {
@@ -188,7 +191,7 @@ async function api(account, jar, method, path) {
       headers["Content-Type"] = "application/json";
       headers.Origin = BASE;
     }
-    const response = await http(method, `${BASE}${path}`, headers);
+    const response = await http(method, `${BASE}${path}`, headers, undefined, deadline);
     mergeCookies(jar, response.headers);
     const challenge = [200, 403].includes(response.status) && /<script\b/i.test(response.body) && response.body.includes("acw_sc__v2");
     if (!challenge) return response;
@@ -197,11 +200,11 @@ async function api(account, jar, method, path) {
   }
 }
 
-async function signAccount(account) {
+async function signAccount(account, deadline) {
   const jar = { session: account.session };
-  const identity = parseResponse(await api(account, jar, "GET", "/api/user/self"), "账号验证");
+  const identity = parseResponse(await api(account, jar, "GET", "/api/user/self", deadline), "账号验证");
   if (identity?.success !== true || identity?.data?.id !== account.id) throw new Error("登录状态无效或用户 ID 不一致，请重新登录抓取");
-  const result = parseResponse(await api(account, jar, "POST", "/api/user/sign_in"), "签到");
+  const result = parseResponse(await api(account, jar, "POST", "/api/user/sign_in", deadline), "签到");
   if (result?.success !== true) {
     const message = typeof result?.message === "string" ? `：${redact(result.message).slice(0, 180)}` : "";
     throw new Error(`签到未成功${message}`);
@@ -228,6 +231,7 @@ async function telegram(text) {
 }
 
 async function cron() {
+  const deadline = Date.now() + RUN_BUDGET_MS;
   const accounts = readAccounts();
   if (!accounts.length) throw new Error("没有已保存账号，请在 Surge 生效的设备上登录并打开个人设置");
   secrets.push(...accounts.map(account => account.session));
@@ -236,7 +240,7 @@ async function cron() {
   // 按账号顺序执行，避免多账号同时触发动态验证或形成突发访问。
   const results = [];
   for (const account of accounts) {
-    try { results.push({ id: account.id, ...await signAccount(account) }); }
+    try { results.push({ id: account.id, ...await signAccount(account, deadline) }); }
     catch (error) { results.push({ id: account.id, kind: "failed", message: redact(error.message).slice(0, 180) }); }
   }
   const count = kind => results.filter(result => result.kind === kind).length;
