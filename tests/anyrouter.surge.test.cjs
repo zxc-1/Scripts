@@ -319,7 +319,7 @@ test('module matches only authenticated self responses and schedules one daily r
   for (const url of ['http://anyrouter.top/api/user/self', 'https://anyrouter.top.evil.test/api/user/self', `${BASE}/api/user/self/more`, `${BASE}/console`]) assert.equal(pattern.test(url), false, url);
   const cron = module.split('\n').filter(line => /type=cron(?:,|$)/.test(line));
   assert.equal(cron.length, 1);
-  assert.match(cron[0], /cronexp="10 9 \* \* \*"/);
+  assert.match(cron[0], /cronexp="30 9 \* \* \*"/);
   assert.match(cron[0], /timeout=\d+(?:,|$)/);
   assert.match(module, /hostname\s*=\s*%APPEND% anyrouter\.top/);
   const paths = [...module.matchAll(/script-path=([^,\n]+)/g)].map(m => m[1]);
