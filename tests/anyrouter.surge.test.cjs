@@ -325,7 +325,7 @@ test('module matches only authenticated self responses and schedules one daily r
   const paths = [...module.matchAll(/script-path=([^,\n]+)/g)].map(m => m[1]);
   assert.equal(paths.length, 2);
   assert.equal(paths[0], paths[1]);
-  assert.match(paths[0], /^https:\/\/raw\.githubusercontent\.com\/zxc-1\/Scripts\//);
+  assert.match(paths[0], /^https:\/\/raw\.githubusercontent\.com\/zxc-1\/Scripts\/(?:refs\/heads\/main|[a-f0-9]{40})\/Surge\/anyrouter\.surge\.js$/);
 });
 
 
