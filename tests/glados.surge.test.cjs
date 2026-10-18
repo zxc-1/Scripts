@@ -152,3 +152,12 @@ test('the Surge module captures the current API host and appends MITM hosts', ()
   assert.equal(pattern.test('https://glados.network.evil.test/api/user/status'), false);
   assert.match(module, /hostname\s*=\s*%APPEND%.*glados\.network/);
 });
+
+test('the module schedules its daily 09:10 cron using the documented Surge format', () => {
+  const module = fs.readFileSync(modulePath, 'utf8');
+  const cron = module.split('\n').find(line => /type=cron(?:,|$)/.test(line));
+  assert.ok(cron, 'a named cron script must be registered');
+  assert.match(cron, /cronexp="10 9 \* \* \*"/);
+  assert.match(cron, /timeout=60/);
+  assert.match(cron, /wake-system=true/);
+});
