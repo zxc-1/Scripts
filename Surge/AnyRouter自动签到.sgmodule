@@ -1,0 +1,11 @@
+#!name=AnyRouter 自动签到
+#!desc=验证登录后保存 session、原始 UA 与用户 ID，本地处理动态验证，每日签到，可选 Telegram
+
+[Script]
+# 每天 09:10，使用设备本地时区；北京时间 08:00 后运行。Surge iOS 5.9+ / Mac 5.5+。
+AnyRouter_Checkin = type=cron,cronexp="10 9 * * *",script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/codex/add-anyrouter-checkin/Surge/anyrouter.surge.js,timeout=60,wake-system=true
+AnyRouter_Capture = type=http-response,pattern=^https:\/\/anyrouter\.top\/api\/user\/self(?:\?.*)?$,requires-body=true,script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/codex/add-anyrouter-checkin/Surge/anyrouter.surge.js
+
+[MITM]
+# 在 Surge 已启用 MITM 并信任其证书的设备上，登录后打开“个人设置”或刷新控制台。
+hostname = %APPEND% anyrouter.top

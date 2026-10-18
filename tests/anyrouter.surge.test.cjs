@@ -1,0 +1,344 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const scriptPath = process.env.ANYROUTER_SCRIPT || path.resolve(__dirname, '../Surge/anyrouter.surge.js');
+const modulePath = process.env.ANYROUTER_MODULE || path.resolve(__dirname, '../Surge/AnyRouter自动签到.sgmodule');
+const source = fs.readFileSync(scriptPath, 'utf8');
+const KEY = 'ANYROUTER_ACCOUNTS';
+const BASE = 'https://anyrouter.top';
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36';
+const SESSION = 'test-session-value==';
+const ACCOUNT = { id: 123, session: SESSION, userAgent: UA };
+const ARG = '152EAAA776AB045C5B3169B48740D76FC4AB7EEB';
+const SOLVED = '6ad4db7e67b3d49d86bfea4476f43eae7da044ce';
+const WAF = fs.readFileSync(path.resolve(__dirname, 'fixtures/anyrouter-waf.html'), 'utf8').replace(/arg1='[A-F0-9]+'/i, `arg1='${ARG}'`);
+const OK = { success: true, message: '签到成功，获得 $25 额度' };
+const authBody = id => ({ success: true, message: '', data: { id, username: `test_${id}`, quota: 500 } });
+const stored = (accounts = [ACCOUNT]) => ({ [KEY]: JSON.stringify({ version: 1, accounts }) });
+const request = (headers = {}, url = `${BASE}/api/user/self`) => ({ url, method: 'GET', headers: { Cookie: `session=${SESSION}; acw_sc__v2=old-waf`, 'User-Agent': UA, 'New-API-User': '123', ...headers } });
+
+async function run(options = {}) {
+  const values = { ...options.store };
+  const requests = [], writes = [], notifications = [], logs = [], doneResults = [];
+  let doneCalls = 0, finish;
+  const complete = new Promise(resolve => { finish = resolve; });
+  const respond = (method, req, callback) => {
+    requests.push({ method, ...req });
+    const reply = options.reply ? options.reply({ method, request: req, index: requests.length - 1 }) : {
+      status: 200,
+      body: req.url.includes('api.telegram.org') ? { ok: true } : req.url.endsWith('/api/user/self') ? authBody(Number(req.headers['New-API-User'])) : OK,
+    };
+    queueMicrotask(() => callback(reply.error || null, { status: reply.status, headers: reply.headers || {} }, typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body)));
+  };
+  const context = {
+    $persistentStore: {
+      read: key => values[key] ?? null,
+      write: (value, key) => { writes.push({ key, value }); if (options.throwWrite) throw new Error('disk error'); if (options.failWrite) return false; values[key] = value; return true; },
+    },
+    $httpClient: { get: (req, cb) => respond('GET', req, cb), post: (req, cb) => respond('POST', req, cb) },
+    $notification: { post: (...args) => notifications.push(args) },
+    $done: value => { doneCalls++; doneResults.push(value); finish(); },
+    console: { log: (...args) => logs.push(args.join(' ')) },
+  };
+  if (options.request) {
+    context.$request = options.request;
+    const response = options.response === undefined ? { status: 200, body: authBody(123) } : options.response;
+    if (response) context.$response = { ...response, body: typeof response.body === 'string' ? response.body : JSON.stringify(response.body) };
+  }
+  vm.runInNewContext(source, context, { filename: scriptPath, timeout: 1000 });
+  await complete;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(doneCalls, 1);
+  return { values, requests, writes, notifications, logs, doneResults, text: notifications.flat().join('\n') };
+}
+
+test('authenticated capture atomically saves only the verified account, session and actual UA', async () => {
+  const r = await run({ request: request() });
+  assert.deepEqual(JSON.parse(r.values[KEY]), { version: 1, accounts: [ACCOUNT] });
+  assert.equal(r.writes.length, 1);
+  assert.equal(r.requests.length, 0);
+  assert.match(r.text, /已验证登录/);
+  assert.deepEqual(JSON.parse(JSON.stringify(r.doneResults)), [{}]);
+});
+
+test('capture supports case insensitive and full-mode request headers', async () => {
+  for (const headers of [
+    { cOOkie: `session=${SESSION}`, 'uSer-Agent': UA, 'new-api-user': '123' },
+    [{ field: 'cookie', value: `session=${SESSION}` }, { field: 'user-agent', value: UA }, { field: 'new-api-user', value: '123' }],
+  ]) {
+    const r = await run({ request: { url: `${BASE}/api/user/self?source=console`, method: 'GET', headers } });
+    assert.deepEqual(JSON.parse(r.values[KEY]).accounts, [ACCOUNT]);
+  }
+});
+
+for (const [name, response] of Object.entries({
+  'not logged in': { status: 401, body: { success: false, message: '未登录' } },
+  'HTTP200 business denial': { status: 200, body: { success: false, data: { id: 123 } } },
+  'missing success': { status: 200, body: { data: { id: 123 } } },
+  'string success': { status: 200, body: { success: 'true', data: { id: 123 } } },
+  'missing data': { status: 200, body: { success: true } },
+  'invalid id': { status: 200, body: authBody(0) },
+  'wrong account': { status: 200, body: authBody(456) },
+  'WAF HTML': { status: 200, body: WAF },
+  'server error': { status: 500, body: authBody(123) },
+  'no response': null,
+})) {
+  test(`capture silently preserves the previous session for ${name}`, async () => {
+    const old = stored();
+    const r = await run({ store: old, request: request({ Cookie: 'session=new-session' }), response });
+    assert.equal(r.values[KEY], old[KEY]);
+    assert.equal(r.writes.length, 0);
+    assert.equal(r.notifications.length, 0);
+    assert.equal(r.requests.length, 0);
+  });
+}
+
+test('capture rejects missing session, missing UA, invalid/missing id and duplicate session cookies', async () => {
+  for (const hdrs of [{ Cookie: 'acw_sc__v2=waf' }, { 'User-Agent': '' }, { 'New-API-User': '' }, { 'New-API-User': '123junk' }, { Cookie: 'session=one; session=two' }, { Cookie: 'session=bad\r\nvalue' }]) {
+    const r = await run({ store: stored(), request: request(hdrs) });
+    assert.equal(r.writes.length, 0);
+    assert.equal(r.notifications.length, 0);
+  }
+});
+
+test('unchanged session stays silent even when WAF cookie values or order change', async () => {
+  const r = await run({ store: stored(), request: request({ Cookie: `cdn_sec_tc=new; session=${SESSION}; acw_sc__v2=rotated` }) });
+  assert.equal(r.writes.length, 0);
+  assert.equal(r.notifications.length, 0);
+});
+
+test('refreshing a session updates that account while preserving other accounts', async () => {
+  const other = { id: 456, session: 'other-session', userAgent: 'other-UA' };
+  const r = await run({ store: stored([ACCOUNT, other]), request: request({ Cookie: 'session=refreshed', 'User-Agent': 'new-UA' }) });
+  assert.deepEqual(JSON.parse(r.values[KEY]).accounts, [{ ...ACCOUNT, session: 'refreshed', userAgent: 'new-UA' }, other]);
+  assert.equal(r.notifications.length, 1);
+});
+
+test('a newly verified account is appended using its server id without a digit-length assumption', async () => {
+  const r = await run({ store: stored(), request: request({ 'New-API-User': '7' }), response: { status: 200, body: authBody(7) } });
+  assert.deepEqual(JSON.parse(r.values[KEY]).accounts.map(a => a.id), [123, 7]);
+});
+
+test('storage errors cannot produce a capture success or replace the previous record', async () => {
+  for (const option of [{ failWrite: true }, { throwWrite: true }]) {
+    const before = stored();
+    const r = await run({ ...option, store: before, request: request({ Cookie: 'session=new-session' }) });
+    assert.equal(r.values[KEY], before[KEY]);
+    assert.match(r.text, /保存失败/);
+    assert.doesNotMatch(r.text, /获取成功/);
+  }
+});
+
+test('corrupt stored accounts are reported and preserved instead of overwritten or ignored', async () => {
+  for (const value of ['{bad json', JSON.stringify({ version: 2, accounts: [ACCOUNT] }), JSON.stringify({ version: 1, accounts: [ACCOUNT, ACCOUNT] }), JSON.stringify({ version: 1, accounts: [{ ...ACCOUNT, userAgent: '' }] })]) {
+    const r = await run({ store: { [KEY]: value }, request: request() });
+    assert.equal(r.values[KEY], value);
+    assert.equal(r.writes.length, 0);
+    assert.match(r.text, /存储|配置/);
+    assert.doesNotMatch(r.text, /获取成功/);
+  }
+});
+
+test('capture is limited to GET self on the official HTTPS origin', async () => {
+  for (const url of ['http://anyrouter.top/api/user/self', 'https://anyrouter.top.evil.test/api/user/self', 'https://anyrouter.top@evil.test/api/user/self', `${BASE}/api/user/self/extra`, `${BASE}/api/user/sign_in`, `${BASE}/console`]) {
+    const r = await run({ request: request({}, url) });
+    assert.equal(r.writes.length, 0, url);
+  }
+  const r = await run({ request: { ...request(), method: 'PUT' } });
+  assert.equal(r.writes.length, 0);
+});
+
+test('cron verifies identity before signing in and preserves the captured request identity', async () => {
+  const r = await run({ store: stored() });
+  assert.deepEqual(r.requests.map(req => [req.method, req.url]), [['GET', `${BASE}/api/user/self`], ['POST', `${BASE}/api/user/sign_in`]]);
+  for (const req of r.requests) {
+    assert.equal(req.headers.Cookie, `session=${SESSION}`);
+    assert.equal(req.headers['User-Agent'], UA);
+    assert.equal(req.headers['New-API-User'], '123');
+    assert.equal(req['auto-cookie'], false);
+    assert.equal(req['auto-redirect'], false);
+    assert.equal(req['full-header-mode'], true);
+    assert.equal(req.timeout, 4);
+    assert.notEqual(req.insecure, true);
+  }
+  assert.equal(r.requests[1].body, '');
+  assert.match(r.text, /成功 1，重复 0，失败 0/);
+  assert.match(r.text, /获得 \$25/);
+});
+
+test('an empty successful message means already signed in, without invented reward', async () => {
+  const r = await run({ store: stored(), reply: ({ request: req }) => ({ status: 200, body: req.url.endsWith('/self') ? authBody(123) : { success: true, message: '' } }) });
+  assert.match(r.text, /成功 0，重复 1，失败 0/);
+  assert.match(r.text, /今日已签到/);
+  assert.doesNotMatch(r.text, /获得|\$25/);
+});
+
+for (const [name, response] of Object.entries({
+  '401': { status: 401, body: { success: false } },
+  '403': { status: 403, body: 'Forbidden' },
+  '429': { status: 429, body: 'Too Many Requests' },
+  'HTTP200 HTML': { status: 200, body: '<html>please log in</html>' },
+  'missing success': { status: 200, body: { message: 'OK' } },
+  'string success': { status: 200, body: { success: 'true', message: 'OK' } },
+  'denied': { status: 200, body: { success: false, message: '业务拒绝' } },
+  'missing message': { status: 200, body: { success: true } },
+  'malformed message': { status: 200, body: { success: true, message: 1 } },
+  'network error': { error: 'connection failed' },
+  'redirect': { status: 302, headers: { Location: 'https://other.example/' }, body: '' },
+})) {
+  test(`cron reports ${name} as a failure without retrying an ambiguous POST`, async () => {
+    const r = await run({ store: stored(), reply: ({ request: req }) => req.url.endsWith('/self') ? { status: 200, body: authBody(123) } : response });
+    assert.equal(r.requests.length, 2);
+    assert.match(r.text, /成功 0，重复 0，失败 1/);
+    assert.doesNotMatch(r.text, /签到成功|获得 \$25/);
+  });
+}
+
+test('a mismatched or denied preflight identity never submits a sign-in POST', async () => {
+  for (const body of [authBody(456), { success: false, message: '未登录' }, { success: true, data: {} }]) {
+    const r = await run({ store: stored(), reply: () => ({ status: 200, body }) });
+    assert.equal(r.requests.length, 1);
+    assert.match(r.text, /失败 1/);
+  }
+});
+
+test('real WAF HTML is solved locally and challenge cookies are merged into the retry', async () => {
+  const r = await run({ store: stored(), reply: ({ index, request: req }) => index === 0 ? {
+    status: 200,
+    headers: [{ field: 'Set-Cookie', value: 'acw_tc=first; Path=/' }, { field: 'set-cookie', value: 'cdn_sec_tc=second; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/' }],
+    body: WAF,
+  } : { status: 200, body: req.url.endsWith('/self') ? authBody(123) : OK } });
+  assert.equal(r.requests.length, 3);
+  assert.equal(r.requests[0].method, 'GET');
+  assert.equal(r.requests[1].method, 'GET');
+  for (const req of r.requests.slice(1)) {
+    assert.match(req.headers.Cookie, new RegExp(`acw_sc__v2=${SOLVED}`));
+    assert.match(req.headers.Cookie, /acw_tc=first/);
+    assert.match(req.headers.Cookie, /cdn_sec_tc=second/);
+    assert.match(req.headers.Cookie, /session=test-session-value==/);
+  }
+  assert.equal(r.writes.length, 0, 'ephemeral WAF cookies must not rewrite persistent login state');
+  assert.match(r.text, /成功 1/);
+});
+
+test('a WAF page on POST retries only that rejected challenge and keeps the empty body', async () => {
+  const r = await run({ store: stored(), reply: ({ index, request: req }) => ({ status: 200, body: index === 1 ? WAF : req.url.endsWith('/self') ? authBody(123) : OK }) });
+  assert.deepEqual(r.requests.map(req => req.method), ['GET', 'POST', 'POST']);
+  assert.equal(r.requests[2].body, '');
+  assert.match(r.requests[2].headers.Cookie, new RegExp(`acw_sc__v2=${SOLVED}`));
+  assert.match(r.text, /成功 1/);
+});
+
+test('repeated WAF challenges stop after two retries with a clear failure', async () => {
+  const r = await run({ store: stored(), reply: () => ({ status: 200, body: WAF }) });
+  assert.equal(r.requests.length, 3);
+  assert.match(r.text, /动态验证.*失败|动态验证.*上限/);
+  assert.match(r.text, /失败 1/);
+});
+
+test('an unsupported challenge is never evaluated or treated as a success', async () => {
+  const r = await run({ store: stored(), reply: () => ({ status: 200, body: WAF.replace('0xf,0x23', '0x23,0xf') }) });
+  assert.equal(r.requests.length, 1);
+  assert.match(r.text, /验证.*格式/);
+});
+
+test('combined Set-Cookie headers handle expiry commas and delete expired cookies', async () => {
+  const r = await run({ store: stored(), reply: ({ index, request: req }) => index === 0 ? {
+    status: 403, headers: { 'sEt-CoOkIe': 'acw_tc=valid; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/, cdn_sec_tc=removed; Max-Age=0; Path=/' }, body: WAF,
+  } : { status: 200, body: req.url.endsWith('/self') ? authBody(123) : OK } });
+  assert.match(r.requests[1].headers.Cookie, /acw_tc=valid/);
+  assert.doesNotMatch(r.requests[1].headers.Cookie, /cdn_sec_tc/);
+  assert.match(r.text, /成功 1/);
+});
+
+test('multiple accounts have isolated sessions, UA values, headers and WAF jars', async () => {
+  const other = { id: 456, session: 'different-session', userAgent: 'second-device-UA' };
+  let seen = false;
+  const r = await run({ store: stored([ACCOUNT, other]), reply: ({ request: req }) => {
+    const id = Number(req.headers['New-API-User']);
+    if (id === 123 && !seen) { seen = true; return { status: 200, body: WAF }; }
+    return { status: 200, body: req.url.endsWith('/self') ? authBody(id) : id === 456 ? { success: true, message: '' } : OK };
+  } });
+  const second = r.requests.filter(req => req.headers['New-API-User'] === '456');
+  assert.equal(second.length, 2);
+  for (const req of second) {
+    assert.equal(req.headers.Cookie, 'session=different-session');
+    assert.equal(req.headers['User-Agent'], 'second-device-UA');
+  }
+  assert.match(r.text, /成功 1，重复 1，失败 0/);
+});
+
+test('a broken account does not stop another account from checking in', async () => {
+  const other = { id: 456, session: 'different-session', userAgent: 'second-UA' };
+  const r = await run({ store: stored([ACCOUNT, other]), reply: ({ request: req }) => req.headers['New-API-User'] === '123' ? { status: 401, body: {} } : { status: 200, body: req.url.endsWith('/self') ? authBody(456) : OK } });
+  assert.match(r.text, /成功 1，重复 0，失败 1/);
+});
+
+test('empty, malformed or excessive account configuration never sends a request', async () => {
+  for (const store of [{}, { [KEY]: '{' }, stored(Array.from({ length: 11 }, (_, i) => ({ ...ACCOUNT, id: i + 1 })))]) {
+    const r = await run({ store });
+    assert.equal(r.requests.length, 0);
+    assert.match(r.text, /登录|存储|配置/);
+  }
+});
+
+test('optional Telegram uses plain text and checks the actual API ok field', async () => {
+  const token = '123456:test-bot-token';
+  const r = await run({ store: { ...stored(), TG_BOT_TOKEN: token, TG_CHAT_ID: '-1234' } });
+  const telegram = r.requests.find(req => req.url.startsWith('https://api.telegram.org/'));
+  assert.ok(telegram);
+  assert.equal(telegram['auto-redirect'], false);
+  assert.equal(telegram['auto-cookie'], false);
+  const body = JSON.parse(telegram.body);
+  assert.equal(body.chat_id, '-1234');
+  assert.equal(body.parse_mode, undefined);
+  assert.match(body.text, /成功 1/);
+  assert.equal(r.notifications.length, 1);
+});
+
+test('Telegram business or transport failures stay visible without changing a completed check-in', async () => {
+  const token = '123456:test-bot-token';
+  for (const response of [{ status: 200, body: { ok: false, description: token } }, { error: `network failure at https://api.telegram.org/bot${token}/sendMessage` }]) {
+    const r = await run({ store: { ...stored(), TG_BOT_TOKEN: token, TG_CHAT_ID: '-1234' }, reply: ({ request: req }) => req.url.includes('api.telegram.org') ? response : { status: 200, body: req.url.endsWith('/self') ? authBody(123) : OK } });
+    assert.match(r.text, /成功 1，重复 0，失败 0/);
+    assert.match(r.text, /Telegram.*失败/);
+    assert.equal(r.text.includes(token), false);
+  }
+});
+
+test('incomplete Telegram settings cause no request to Telegram and show the configuration error', async () => {
+  const r = await run({ store: { ...stored(), TG_BOT_TOKEN: '123456:test-bot-token' } });
+  assert.equal(r.requests.length, 2);
+  assert.match(r.text, /Telegram.*配置/);
+});
+
+test('notifications and Telegram payloads redact stored session and bot token from business text', async () => {
+  const token = '123456:test-bot-token';
+  const r = await run({ store: { ...stored(), TG_BOT_TOKEN: token, TG_CHAT_ID: '-1234' }, reply: ({ request: req }) => ({ status: 200, body: req.url.includes('api.telegram.org') ? { ok: true } : req.url.endsWith('/self') ? authBody(123) : { success: false, message: `denied session=${SESSION}; token=${token}` } }) });
+  const visible = r.text + r.logs.join('\n') + r.requests.filter(req => req.url.includes('api.telegram.org')).map(req => req.body).join('\n');
+  assert.equal(visible.includes(SESSION), false);
+  assert.equal(visible.includes(token), false);
+});
+
+test('module matches only authenticated self responses and schedules one daily run', () => {
+  const module = fs.readFileSync(modulePath, 'utf8');
+  const capture = module.split('\n').find(line => line.startsWith('AnyRouter_Capture'));
+  assert.match(capture, /type=http-response(?:,|$)/);
+  assert.match(capture, /requires-body=true(?:,|$)/);
+  const pattern = new RegExp(capture.match(/pattern=([^,]+)/)[1]);
+  assert.equal(pattern.test(`${BASE}/api/user/self`), true);
+  assert.equal(pattern.test(`${BASE}/api/user/self?source=console`), true);
+  for (const url of ['http://anyrouter.top/api/user/self', 'https://anyrouter.top.evil.test/api/user/self', `${BASE}/api/user/self/more`, `${BASE}/console`]) assert.equal(pattern.test(url), false, url);
+  const cron = module.split('\n').filter(line => /type=cron(?:,|$)/.test(line));
+  assert.equal(cron.length, 1);
+  assert.match(cron[0], /cronexp="10 9 \* \* \*"/);
+  assert.match(cron[0], /timeout=60/);
+  assert.match(module, /hostname\s*=\s*%APPEND% anyrouter\.top/);
+  const paths = [...module.matchAll(/script-path=([^,\n]+)/g)].map(m => m[1]);
+  assert.equal(paths.length, 2);
+  assert.equal(paths[0], paths[1]);
+  assert.match(paths[0], /^https:\/\/raw\.githubusercontent\.com\/zxc-1\/Scripts\//);
+});
