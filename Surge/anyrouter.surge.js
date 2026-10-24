@@ -151,7 +151,12 @@ function responseReason(response) {
   reason = reason.slice(0, 160);
   const gateway = headerValues(response.headers, "x-tengine-error")[0]?.trim().slice(0, 120);
   const server = headerValues(response.headers, "server")[0]?.trim().slice(0, 60);
-  if (gateway) reason = `${reason || "网关拒绝"}（${server ? `服务器: ${server}；` : ""}网关: ${gateway}）`;
+  if (gateway) {
+    const hint = response.status === 403 && /denied by http_custom/i.test(gateway)
+      ? "ESA 自定义规则拒绝；登录状态未知"
+      : "";
+    reason = `${reason || "网关拒绝"}（${server ? `服务器: ${server}；` : ""}${hint ? `${hint}；` : ""}网关: ${gateway}）`;
+  }
   else if (server && response.status === 403) reason = `${reason || "请求被拒绝"}（服务器: ${server}）`;
   return redact(reason);
 }

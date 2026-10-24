@@ -229,6 +229,7 @@ test('HTTP errors include a sanitized response reason and gateway hint', async (
   } : { status: 200, body: OK } });
   assert.match(r.text, /账号验证 HTTP 403：Forbidden/);
   assert.match(r.text, /网关: denied by http_custom/);
+  assert.match(r.text, /ESA 自定义规则拒绝；登录状态未知/);
 });
 
 test('JSON HTTP errors expose the server message', async () => {
