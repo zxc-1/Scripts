@@ -93,9 +93,13 @@ function capture() {
   const id = result?.data?.id;
   const headerId = headerValues($request.headers, "New-API-User");
   const agents = headerValues($request.headers, "User-Agent");
-  const session = sessionFromHeaders($request.headers);
+  const capturedSession = sessionFromHeaders($request.headers);
   if (result?.success !== true || !positiveId(id) || headerId.length !== 1 || headerId[0].trim() !== String(id) ||
-      agents.length !== 1 || !validUserAgent(agents[0]) || !session) return;
+      agents.length !== 1 || !validUserAgent(agents[0]) || !capturedSession) return;
+  const jar = { session: capturedSession };
+  mergeCookies(jar, $response.headers);
+  const session = jar.session;
+  if (!validSession(session)) return;
   const userAgent = agents[0].trim();
   const accounts = readAccounts();
   const index = accounts.findIndex(account => account.id === id);
@@ -129,8 +133,33 @@ function http(method, url, headers) {
   });
 }
 
+function responseReason(response) {
+  let reason = "";
+  try {
+    const parsed = JSON.parse(response.body);
+    if (typeof parsed?.message === "string") reason = parsed.message.trim();
+  } catch (error) {
+    const body = String(response.body || "");
+    reason = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
+      || body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]
+      || body.match(/id=["']challenge-error-text["'][^>]*>([\s\S]*?)<\//i)?.[1]
+      || body.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<[^>]*>/g, " ");
+    reason = reason.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'").replace(/\s+/g, " ").trim();
+  }
+  if (!reason) reason = String(response.body || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  reason = reason.slice(0, 160);
+  const gateway = headerValues(response.headers, "x-tengine-error")[0]?.trim().slice(0, 120);
+  const server = headerValues(response.headers, "server")[0]?.trim().slice(0, 60);
+  if (gateway) reason = `${reason || "网关拒绝"}（${server ? `服务器: ${server}；` : ""}网关: ${gateway}）`;
+  else if (server && response.status === 403) reason = `${reason || "请求被拒绝"}（服务器: ${server}）`;
+  return redact(reason);
+}
+
 function parseResponse(response, label) {
   if (response.status !== 200) {
+    const reason = responseReason(response);
+    if (reason) throw new Error(`${label} HTTP ${response.status || "未知"}：${reason}`);
     if (response.status === 401) throw new Error(`${label} HTTP 401：登录已失效，请重新登录抓取`);
     throw new Error(`${label} HTTP ${response.status || "未知"}`);
   }
@@ -174,6 +203,24 @@ function mergeCookies(jar, headers) {
   }
 }
 
+function persistSession(account, session) {
+  if (session === account.session) return;
+  if (!validSession(session)) throw new Error("服务端返回了无效的新 session");
+  const latest = readAccounts();
+  const index = latest.findIndex(item => item.id === account.id);
+  if (index < 0) throw new Error(`账号 ${account.id} 已从本地存储移除`);
+  if (latest[index].session === session) {
+    account.session = session;
+    return;
+  }
+  if (latest[index].session !== account.session) throw new Error(`账号 ${account.id} 的 session 已被更新，请重新验证账号`);
+  latest[index] = { ...latest[index], session };
+  if (!$persistentStore.write(JSON.stringify({ version: 1, accounts: latest }), ACCOUNTS_KEY)) {
+    throw new Error(`账号 ${account.id} 的新 session 保存失败`);
+  }
+  account.session = session;
+}
+
 async function api(account, jar, method, path) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (!validSession(jar.session)) throw new Error("服务端已清除登录 session，请重新登录抓取");
@@ -199,6 +246,7 @@ async function api(account, jar, method, path) {
 async function quotaInfo(account, jar, getUnit) {
   const result = parseResponse(await api(account, jar, "GET", "/api/user/self"), "额度查询");
   if (result?.success !== true || result?.data?.id !== account.id) throw new Error("额度查询的登录状态或用户 ID 无效");
+  persistSession(account, jar.session);
   const { quota, used_quota: used } = result.data;
   if (![quota, used, quota + used].every(Number.isSafeInteger) || used < 0) throw new Error("额度字段缺失或格式无效");
   return { remaining: quota, used, unit: await getUnit(account, jar) };
@@ -228,11 +276,13 @@ async function signAccount(account, getUnit) {
   const jar = { session: account.session };
   const identity = parseResponse(await api(account, jar, "GET", "/api/user/self"), "账号验证");
   if (identity?.success !== true || identity?.data?.id !== account.id) throw new Error("登录状态无效或用户 ID 不一致，请重新登录抓取");
+  persistSession(account, jar.session);
   const result = parseResponse(await api(account, jar, "POST", "/api/user/sign_in"), "签到");
   if (result?.success !== true) {
     const message = typeof result?.message === "string" ? `：${redact(result.message).slice(0, 180)}` : "";
     throw new Error(`签到未成功${message}`);
   }
+  persistSession(account, jar.session);
   if (typeof result.message !== "string") throw new Error("签到响应缺少 message，结果未确认");
   const message = redact(result.message.trim()).slice(0, 180);
   const repeat = !message || /今日已签到|已经签到|already.*(?:signed|check)/i.test(message);
@@ -252,6 +302,7 @@ async function cron() {
     const result = parseResponse(response, "额度配置");
     const unit = result?.data?.quota_per_unit;
     if (result?.success !== true || typeof unit !== "number" || !Number.isFinite(unit) || unit <= 0) throw new Error("额度换算参数缺失或无效");
+    persistSession(account, jar.session);
     return unit;
   });
   for (const account of accounts) {

@@ -68,6 +68,14 @@ test('authenticated capture atomically saves only the verified account, session 
   assert.deepEqual(JSON.parse(JSON.stringify(r.doneResults)), [{}]);
 });
 
+test('capture stores the server-issued session when the response rotates it', async () => {
+  const r = await run({
+    request: request({ Cookie: 'session=request-session' }),
+    response: { status: 200, headers: { 'Set-Cookie': 'session=response-session; Path=/; HttpOnly' }, body: authBody(123) },
+  });
+  assert.deepEqual(JSON.parse(r.values[KEY]).accounts, [{ id: 123, session: 'response-session', userAgent: UA }]);
+});
+
 test('capture supports case insensitive and full-mode request headers', async () => {
   for (const headers of [
     { cOOkie: `session=${SESSION}`, 'uSer-Agent': UA, 'new-api-user': '123' },
@@ -173,6 +181,17 @@ test('cron verifies identity before signing in and preserves the captured reques
   assert.match(r.text, /获得 \$25/);
 });
 
+test('cron persists server-rotated sessions before using them for later requests', async () => {
+  const r = await run({ store: stored(), reply: ({ index, request: req }) => {
+    if (index === 0) return { status: 200, headers: { 'Set-Cookie': 'session=rotated-session; Path=/; HttpOnly' }, body: authBody(123) };
+    return { status: 200, body: req.url.endsWith('/self') ? authBody(123) : req.url.endsWith('/status') ? STATUS : OK };
+  } });
+  assert.deepEqual(JSON.parse(r.values[KEY]).accounts, [{ ...ACCOUNT, session: 'rotated-session' }]);
+  assert.equal(r.requests[1].headers.Cookie, 'session=rotated-session');
+  assert.equal(r.requests[2].headers.Cookie, 'session=rotated-session');
+  assert.match(r.text, /成功 1，已签到 0，失败 0/);
+});
+
 test('an empty successful message means already signed in, without invented reward', async () => {
   const r = await run({ store: stored(), reply: ({ request: req }) => ({ status: 200, body: req.url.endsWith('/self') ? authBody(123) : { success: true, message: '' } }) });
   assert.match(r.text, /成功 0，已签到 1，失败 0/);
@@ -198,8 +217,27 @@ for (const [name, response] of Object.entries({
     assert.equal(r.requests.length, 2);
     assert.match(r.text, /成功 0，已签到 0，失败 1/);
     assert.doesNotMatch(r.text, /签到成功|获得 \$25/);
+    if (name === '403') assert.match(r.text, /签到 HTTP 403：Forbidden/);
   });
 }
+
+test('HTTP errors include a sanitized response reason and gateway hint', async () => {
+  const r = await run({ store: stored(), reply: ({ request: req }) => req.url.endsWith('/self') ? {
+    status: 403,
+    headers: { server: 'ESA', 'x-tengine-error': 'denied by http_custom' },
+    body: 'Forbidden',
+  } : { status: 200, body: OK } });
+  assert.match(r.text, /账号验证 HTTP 403：Forbidden/);
+  assert.match(r.text, /网关: denied by http_custom/);
+});
+
+test('JSON HTTP errors expose the server message', async () => {
+  const r = await run({ store: stored(), reply: ({ request: req }) => req.url.endsWith('/self') ? {
+    status: 401,
+    body: { success: false, message: '无权进行此操作，未登录且未提供 access token' },
+  } : { status: 200, body: OK } });
+  assert.match(r.text, /账号验证 HTTP 401：无权进行此操作，未登录且未提供 access token/);
+});
 
 test('a mismatched or denied preflight identity never submits a sign-in POST', async () => {
   for (const body of [authBody(456), { success: false, message: '未登录' }, { success: true, data: {} }]) {
