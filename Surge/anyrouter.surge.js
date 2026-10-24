@@ -127,7 +127,16 @@ function http(method, url, headers) {
   if (method === "POST") options.body = "";
   return new Promise((resolve, reject) => {
     $httpClient[method.toLowerCase()](options, (error, response, data) => {
-      if (error) return reject(new Error("网络请求失败或超时，结果未确认"));
+      if (error) {
+        const endpoint = url.replace(/^https?:\/\/[^/]+/i, "").split("?")[0];
+        const code = error && typeof error === "object" ? error.code : "";
+        const message = error && typeof error === "object" ? error.message || error.localizedDescription : error;
+        const rawDetail = [code, message].filter(value => value !== undefined && value !== null && String(value).trim())
+          .map(String).join(": ") || "网络层未提供错误详情";
+        const detail = redact(rawDetail)
+          .replace(/\s+/g, " ").slice(0, 160);
+        return reject(new Error(`${method} ${endpoint} 网络请求失败：${detail || "网络层未提供错误详情"}；结果未确认`));
+      }
       resolve({ status: Number(response?.status ?? response?.statusCode), headers: response?.headers || {}, body: String(data || "") });
     });
   });
@@ -137,28 +146,33 @@ function responseReason(response) {
   let reason = "";
   try {
     const parsed = JSON.parse(response.body);
-    if (typeof parsed?.message === "string") reason = parsed.message.trim();
+    const fields = ["message", "msg", "error_description", "error", "detail", "description", "reason"];
+    reason = fields.map(field => parsed?.[field]).find(value => typeof value === "string" && value.trim())?.trim() || "";
+    if (reason && ["string", "number"].includes(typeof parsed?.code)) reason += ` (code: ${parsed.code})`;
   } catch (error) {
-    const body = String(response.body || "");
+    const body = String(response.body || "")
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ");
     reason = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
       || body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]
       || body.match(/id=["']challenge-error-text["'][^>]*>([\s\S]*?)<\//i)?.[1]
-      || body.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<[^>]*>/g, " ");
+      || body.replace(/<[^>]*>/g, " ");
     reason = reason.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"')
       .replace(/&#39;/gi, "'").replace(/\s+/g, " ").trim();
   }
-  if (!reason) reason = String(response.body || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  reason = reason.slice(0, 160);
-  const gateway = headerValues(response.headers, "x-tengine-error")[0]?.trim().slice(0, 120);
-  const server = headerValues(response.headers, "server")[0]?.trim().slice(0, 60);
-  if (gateway) {
-    const hint = response.status === 403 && /denied by http_custom/i.test(gateway)
-      ? "ESA 自定义规则拒绝；登录状态未知"
-      : "";
-    reason = `${reason || "网关拒绝"}（${server ? `服务器: ${server}；` : ""}${hint ? `${hint}；` : ""}网关: ${gateway}）`;
+  if (!reason) reason = "响应正文未提供可读原因";
+  reason = redact(reason);
+  const gateway = redact(headerValues(response.headers, "x-tengine-error")[0]?.trim() || "").slice(0, 48);
+  const server = redact(headerValues(response.headers, "server")[0]?.trim() || "").slice(0, 24);
+  const metadata = [];
+  if (server) metadata.push(`服务器: ${server}`);
+  if (gateway && response.status === 403 && /denied by http_custom/i.test(gateway)) {
+    metadata.push("ESA 自定义规则拒绝；登录状态未知");
   }
-  else if (server && response.status === 403) reason = `${reason || "请求被拒绝"}（服务器: ${server}）`;
-  return redact(reason);
+  if (gateway) metadata.push(`x-tengine-error=${gateway}`);
+  const suffix = metadata.length ? `（${metadata.join("；")}）` : "";
+  const reasonBudget = Math.max(0, 130 - suffix.length);
+  return `${reason.slice(0, reasonBudget)}${suffix}`;
 }
 
 function parseResponse(response, label) {
@@ -169,7 +183,10 @@ function parseResponse(response, label) {
     throw new Error(`${label} HTTP ${response.status || "未知"}`);
   }
   try { return JSON.parse(response.body); }
-  catch (error) { throw new Error(`${label} 返回不是 JSON，结果未确认`); }
+  catch (error) {
+    const reason = responseReason(response);
+    throw new Error(`${label} HTTP ${response.status || "未知"}：返回不是 JSON：${reason || "服务端未提供可读原因"}，结果未确认`);
+  }
 }
 
 function solveChallenge(body) {
@@ -243,8 +260,15 @@ async function api(account, jar, method, path) {
     mergeCookies(jar, response.headers);
     const challenge = [200, 403].includes(response.status) && /<script\b/i.test(response.body) && response.body.includes("acw_sc__v2");
     if (!challenge) return response;
-    if (attempt === 2) throw new Error("动态验证失败：重试已达上限");
-    jar.acw_sc__v2 = solveChallenge(response.body);
+    if (attempt === 2) {
+      const reason = responseReason(response) || "服务端未提供可读原因";
+      throw new Error(`动态验证失败：重试已达上限（HTTP ${response.status || "未知"}；${reason}）`);
+    }
+    try { jar.acw_sc__v2 = solveChallenge(response.body); }
+    catch (error) {
+      const reason = responseReason(response) || "服务端未提供可读原因";
+      throw new Error(`动态验证格式异常（HTTP ${response.status || "未知"}；${reason}）：${error.message}`);
+    }
   }
 }
 
