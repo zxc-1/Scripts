@@ -7,7 +7,7 @@
 # 总超时参考值：20 个编号账号 ×（3 次请求 × 默认 5 秒 + 最多 2 秒间隔）约 340 秒，再留约 25% 执行余量。
 # timeout=430 是可调整的项目配置；批量账号超过 20 个时按数量增大。脚本完成后立即退出。
 GLaDOS_Checkin = type=cron,cronexp="10 9 * * *",script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/glados.surge.js, timeout=430, wake-system=true
-GLaDOS_Capture = type=http-response,pattern=^https:\/\/glados\.(network|cloud|one)\/api\/user\/status(?:\?.*)?$,requires-body=true,script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/glados.surge.js
+GLaDOS_Capture = type=http-response,pattern=^https:\/\/glados\.(network|cloud|one)\/api\/user\/status(?:\?.*)?$,requires-body=true,full-header-mode=true,script-path=https://raw.githubusercontent.com/zxc-1/Scripts/refs/heads/main/Surge/glados.surge.js
 
 [MITM]
 # 启用 Surge MITM 并信任其证书；同时更新模块与脚本，登录并刷新控制台后才保存会话。
