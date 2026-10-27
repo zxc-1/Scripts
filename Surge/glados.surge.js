@@ -7,6 +7,8 @@
  */
 
 const DEFAULT_API_BASES = ["https://glados.network"];
+const SESSION_COOKIE_NAMES = ["gld:sess", "gld:sess.sig"];
+const API_PATHS = ["/api/user/checkin", "/api/user/status", "/api/user/points"];
 
 const Store = {
   read: (k) => $persistentStore.read(k),
@@ -45,28 +47,13 @@ function headers(cookie, apiBase, userAgent) {
   };
 }
 
-function httpPost(url, body, hdrs) {
+function http(method, options) {
+  const request = { ...options, "auto-cookie": false, "auto-redirect": false, "full-header-mode": true };
   return new Promise((resolve, reject) => {
-    $httpClient.post(
-      { url, headers: hdrs, body: JSON.stringify(body) },
-      (err, resp, data) => {
-        if (err) return reject(err);
-        resolve({
-          status: resp?.status || resp?.statusCode,
-          headers: resp?.headers || {},
-          body: data,
-        });
-      }
-    );
-  });
-}
-
-function httpGet(url, hdrs) {
-  return new Promise((resolve, reject) => {
-    $httpClient.get({ url, headers: hdrs }, (err, resp, data) => {
+    $httpClient[method](request, (err, resp, data) => {
       if (err) return reject(err);
       resolve({
-        status: resp?.status || resp?.statusCode,
+        status: resp?.status ?? resp?.statusCode,
         headers: resp?.headers || {},
         body: data,
       });
@@ -113,8 +100,94 @@ function sameCookie(left, right) {
   return parts(left) === parts(right);
 }
 
+function headerValues(headers, name) {
+  const entries = Array.isArray(headers) ? headers.map(item => [item.field, item.value]) : Object.entries(headers || {});
+  return entries.filter(([key]) => String(key).toLowerCase() === name.toLowerCase())
+    .flatMap(([, value]) => Array.isArray(value) ? value.map(String) : [String(value ?? "")]);
+}
+
+function cookieJar(cookie) {
+  const jar = {};
+  for (const part of String(cookie || "").split(";")) {
+    const index = part.indexOf("=");
+    if (index < 1) continue;
+    const name = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (/^[\x21-\x7e]+$/.test(name) && /^[\x21-\x7e]*$/.test(value) && !/[;,"\\]/.test(value)) jar[name] = value;
+  }
+  return jar;
+}
+
+function cookieHeader(jar) {
+  return Object.entries(jar).filter(([, value]) => value !== "").map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+function apiCookiePath(path) {
+  const value = String(path || "/").trim();
+  if (!value.startsWith("/")) return false;
+  const prefix = value.endsWith("/") ? value : `${value}/`;
+  return API_PATHS.every(endpoint => endpoint === value || endpoint.startsWith(prefix));
+}
+
+function cookieDomainMatches(domain, host) {
+  const value = String(domain || "").trim().toLowerCase().replace(/^\./, "");
+  const current = String(host || "").trim().toLowerCase();
+  return !value || current === value || current.endsWith(`.${value}`);
+}
+
+function mergeSetCookies(cookie, headers, host) {
+  const original = normalizeCookie(cookie);
+  const responseCookies = headerValues(headers, "Set-Cookie");
+  if (!responseCookies.length) return original;
+  const jar = cookieJar(cookie);
+  let touched = false;
+  let invalid = false;
+  for (const header of responseCookies) {
+    for (const raw of header.split(/,(?=\s*[^;,=\s]+\s*=)/)) {
+      const parts = raw.split(";").map(part => part.trim());
+      const index = parts[0].indexOf("=");
+      if (index < 1) continue;
+      const name = parts[0].slice(0, index).trim();
+      if (!SESSION_COOKIE_NAMES.includes(name)) continue;
+      const attribute = key => parts.slice(1).find(part => part.toLowerCase().startsWith(`${key}=`))?.slice(key.length + 1);
+      if (!cookieDomainMatches(attribute("domain"), host) || !apiCookiePath(attribute("path"))) continue;
+      touched = true;
+      const value = parts[0].slice(index + 1).trim();
+      const maxAge = attribute("max-age");
+      const expires = attribute("expires");
+      const expired = maxAge !== undefined ? Number(maxAge) <= 0 : expires && Date.parse(expires) <= Date.now();
+      if (!value || expired) delete jar[name];
+      else if (/^[\x21-\x7e]+$/.test(value) && !/[;,"\\]/.test(value)) jar[name] = value;
+      else invalid = true;
+    }
+  }
+  if (!touched) return original;
+  if (invalid) throw new Error("服务端返回无效会话 Cookie，请重新登录并抓取 Cookie 与 User-Agent");
+  if (!SESSION_COOKIE_NAMES.every(name => !!jar[name])) {
+    throw new Error("登录会话已清除，请重新登录并抓取 Cookie 与 User-Agent");
+  }
+  return cookieHeader(jar);
+}
+
+function headersAfterResponse(hdrs, response, apiBase) {
+  return { ...hdrs, Cookie: mergeSetCookies(hdrs.Cookie, response.headers, hostFromBase(apiBase)) };
+}
+
+function hasSessionCookie(cookie) {
+  const jar = cookieJar(cookie);
+  const present = SESSION_COOKIE_NAMES.some(name => Object.prototype.hasOwnProperty.call(jar, name));
+  return !present || SESSION_COOKIE_NAMES.every(name => !!jar[name]);
+}
+
+function requireSessionCookie(cookie, label) {
+  if (!hasSessionCookie(cookie)) throw new Error(`${label} 登录会话已清除，请重新登录并抓取 Cookie 与 User-Agent`);
+}
+
 function requestHeader(name) {
   const headers = $request.headers || {};
+  if (Array.isArray(headers)) {
+    return headers.find(item => String(item.field).toLowerCase() === name.toLowerCase())?.value || "";
+  }
   const key = Object.keys(headers).find((k) => k.toLowerCase() === name.toLowerCase());
   return key ? headers[key] : "";
 }
@@ -137,9 +210,20 @@ function captureCookieFromResponse() {
     $done({});
     return;
   }
-  const cookie = normalizeCookie(requestHeader("Cookie"));
+  let cookie = normalizeCookie(requestHeader("Cookie"));
   const userAgent = String(requestHeader("User-Agent") || "").trim();
   if (!cookie || !userAgent) {
+    $done({});
+    return;
+  }
+  try { cookie = mergeSetCookies(cookie, $response.headers, hostFromBase(url)); }
+  catch (error) {
+    $notification.post("GLaDOS CK 获取失败", "登录会话无效", error.message);
+    $done({});
+    return;
+  }
+  if (!hasSessionCookie(cookie)) {
+    $notification.post("GLaDOS CK 获取失败", "登录会话不完整", "登录会话已清除，请重新登录并刷新控制台后重试");
     $done({});
     return;
   }
@@ -179,14 +263,14 @@ function parseAccounts() {
 
   const cookiesBulk = (Store.read("GLADOS_COOKIES") || "")
     .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .map((s, cookieIndex) => ({ cookie: s.trim(), cookieIndex }))
+    .filter(entry => entry.cookie);
 
   if (emailsBulk.length || cookiesBulk.length) {
     if (!emailsBulk.length || emailsBulk.length !== cookiesBulk.length) {
       throw new Error("批量账号 GLADOS_EMAILS 与 GLADOS_COOKIES 数量不一致，请检查配置");
     }
-    return emailsBulk.map((e, i) => ({ email: e, cookie: cookiesBulk[i], userAgent: userAgentFor(i + 1) }));
+    return emailsBulk.map((e, i) => ({ email: e, ...cookiesBulk[i], userAgent: userAgentFor(i + 1), userAgentIndex: i + 1, cookieKey: "GLADOS_COOKIES" }));
   }
 
   const acc = [];
@@ -194,26 +278,69 @@ function parseAccounts() {
     const e = Store.read(`GLADOS_EMAIL_${i}`);
     const c = Store.read(`GLADOS_COOKIE_${i}`);
     if (!c) break;
-    acc.push({ email: e || "", cookie: c, userAgent: userAgentFor(i) });
+    acc.push({ email: e || "", cookie: c, userAgent: userAgentFor(i), userAgentIndex: i, cookieKey: `GLADOS_COOKIE_${i}` });
   }
   if (acc.length) return acc;
   const single = Store.read("GLADOS_COOKIE");
-  return single ? [{ email: Store.read("GLADOS_EMAIL") || "", cookie: single, userAgent: userAgentFor() }] : [];
+  return single ? [{ email: Store.read("GLADOS_EMAIL") || "", cookie: single, userAgent: userAgentFor(), cookieKey: "GLADOS_COOKIE" }] : [];
+}
+
+function storedCookieFor(account) {
+  const raw = String(Store.read(account.cookieKey) || "");
+  if (!Number.isInteger(account.cookieIndex)) return raw;
+  return raw.split(",")[account.cookieIndex]?.trim() || "";
+}
+
+function persistCookie(account, cookie, apiBase) {
+  const current = storedCookieFor(account);
+  const currentBase = apiBases().map(base => String(base).replace(/\/+$/, ""));
+  const currentAgent = userAgentFor(account.userAgentIndex);
+  if (sameCookie(current, cookie)) {
+    if (currentAgent !== account.userAgent || !currentBase.includes(apiBase)) {
+      throw new Error("Cookie 保存失败：会话已被更新，设备或域名也已变化，请保留最新会话");
+    }
+    return { ...account, cookie };
+  }
+  if (!sameCookie(current, account.cookie) || currentAgent !== account.userAgent || !currentBase.includes(apiBase)) {
+    throw new Error("Cookie 保存失败：会话已被更新，请保留最新会话");
+  }
+  let value = cookie;
+  if (Number.isInteger(account.cookieIndex)) {
+    const entries = String(Store.read(account.cookieKey) || "").split(",").map(item => item.trim());
+    if (entries.length <= account.cookieIndex) throw new Error("Cookie 保存失败：批量账号存储已变化");
+    entries[account.cookieIndex] = cookie;
+    value = entries.join(",");
+  }
+  if (!Store.write(value, account.cookieKey)) throw new Error("Cookie 保存失败：持久化存储拒绝写入");
+  return { ...account, cookie };
 }
 
 function parseResponse(response, label) {
   if (String(response.status) !== "200") {
     throw new Error(`${label} HTTP ${response.status}: ${String(response.body || "").slice(0, 150)}`);
   }
+  let result;
   try {
-    return JSON.parse(response.body || "{}");
+    result = JSON.parse(response.body || "{}");
   } catch (e) {
     throw new Error(`${label} JSON 解析失败: ${String(response.body || "").slice(0, 150)}`);
   }
+  if (result?.code === -2) throw new Error(sessionExpiredMessage(label, result.message || "code -2"));
+  return result;
+}
+
+function sessionExpiredMessage(label, detail) {
+  const suffix = detail ? `（${String(detail).slice(0, 120)}）` : "";
+  return `${label} 登录会话已失效${suffix}，请在当前设备重新登录并抓取 Cookie 与 User-Agent`;
+}
+
+function isSessionRejected(result) {
+  return result?.code === -2 || /没有权限|invalid\s+(?:cookie|session)/i.test(String(result?.message || ""));
 }
 
 function checkinMessage(result) {
   if (result?.code === 0) return translateMessage(result.message, result.points);
+  if (isSessionRejected(result)) throw new Error(sessionExpiredMessage("签到", result.message));
   if (result?.code === 1 && /Checkin Repeats|Today's observation logged/i.test(result.message || "")) {
     return "重复签到，今日已完成，请明天再试";
   }
@@ -223,10 +350,15 @@ function checkinMessage(result) {
   throw new Error(`签到失败 (code ${result?.code ?? "未知"}): ${result?.message || "未知签到结果"}`);
 }
 
-async function pointsMessage(apiBase, hdrs) {
+async function pointsMessage(apiBase, hdrs, account) {
   try {
-    const result = parseResponse(await httpGet(`${apiBase}/api/user/points`, hdrs), "Points");
+    const response = await http("get", { url: `${apiBase}/api/user/points`, headers: hdrs });
+    const nextHeaders = headersAfterResponse(hdrs, response, apiBase);
+    requireSessionCookie(nextHeaders.Cookie, "Points");
+    const result = parseResponse(response, "Points");
+    if (isSessionRejected(result)) throw new Error(sessionExpiredMessage("Points", result.message));
     if (result?.code !== 0) throw new Error(`积分接口拒绝请求 (code ${result?.code ?? "未知"}): ${result?.message || "未知错误"}`);
+    persistCookie(account, nextHeaders.Cookie, apiBase);
     const raw = typeof result.points === "number" || typeof result.points === "string" ? String(result.points).trim() : "";
     if (!/^\d+(?:\.\d+)?$/.test(raw)) throw new Error("积分余额无效");
     const [integer, decimals = ""] = raw.split(".");
@@ -257,24 +389,32 @@ function accountMessage(result) {
   return lines.join("\n");
 }
 
-async function signOnce(email, cookie, userAgent) {
+async function signOnce(account) {
+  const { email, userAgent } = account;
+  const cookie = normalizeCookie(account.cookie);
   let lastErr = "";
   for (const base of apiBases()) {
     const apiBase = String(base || "").replace(/\/+$/, "");
     try {
-      const hdrs = headers(cookie, apiBase, userAgent);
+      let hdrs = headers(cookie, apiBase, userAgent);
       const token = hostFromBase(apiBase);
-      const r1 = await httpPost(`${apiBase}/api/user/checkin`, { token }, hdrs);
+      const r1 = await http("post", { url: `${apiBase}/api/user/checkin`, body: JSON.stringify({ token }), headers: hdrs });
+      hdrs = headersAfterResponse(hdrs, r1, apiBase);
+      requireSessionCookie(hdrs.Cookie, "Checkin");
       const j1 = parseResponse(r1, "Checkin");
       const msg = checkinMessage(j1);
-      const r2 = await httpGet(`${apiBase}/api/user/status`, hdrs);
+      const r2 = await http("get", { url: `${apiBase}/api/user/status`, headers: hdrs });
+      hdrs = headersAfterResponse(hdrs, r2, apiBase);
+      requireSessionCookie(hdrs.Cookie, "Status");
       const j2 = parseResponse(r2, "Status");
-      if (j2?.code !== 0 || !j2.data) {
+      if (isSessionRejected(j2)) throw new Error(sessionExpiredMessage("Status", j2.message));
+      if (j2?.code !== 0 || typeof j2.data?.email !== "string" || !j2.data.email.trim()) {
         throw new Error(`Status 失败 (code ${j2?.code ?? "未知"}): ${j2?.message || "缺少账号状态"}`);
       }
+      const savedAccount = persistCookie(account, hdrs.Cookie, apiBase);
       const leftDaysRaw = j2.data.leftDays;
       const left = typeof leftDaysRaw === "number" ? String(leftDaysRaw) : String(leftDaysRaw || "未知");
-      const points = await pointsMessage(apiBase, hdrs);
+      const points = await pointsMessage(apiBase, hdrs, savedAccount);
       return { ok: true, repeated: j1.code === 1, email: email || j2.data.email || "(未提供邮箱)", message: msg, leftDays: left, apiBase, pointsMessage: points };
     } catch (e) {
       lastErr = `${apiBase} -> ${e}`;
@@ -298,9 +438,9 @@ async function runCheckin() {
 
   const results = [];
 
-  for (const { email, cookie, userAgent } of accounts) {
+  for (const account of accounts) {
     await sleep(Math.floor(Math.random() * 2000));
-    results.push(await signOnce(email, normalizeCookie(cookie), userAgent));
+    results.push(await signOnce(account));
   }
 
   const success = results.filter((r) => r.ok && !r.repeated).length;

@@ -10,6 +10,8 @@ const source = fs.readFileSync(scriptPath, 'utf8');
 const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36';
 const WINDOWS_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const COOKIE = 'gld:sess=test-session; gld:sess.sig=test-signature';
+const ROTATED_COOKIE = 'gld:sess=rotated-session==; gld:sess.sig=rotated-signature';
+const rotatedHeaders = { 'Set-Cookie': ['gld:sess=rotated-session==; Path=/; HttpOnly', 'gld:sess.sig=rotated-signature; Path=/; HttpOnly'] };
 const storedSession = { GLADOS_COOKIE: COOKIE, GLADOS_USER_AGENT: MAC_UA, GLADOS_API_BASE: 'https://glados.network' };
 const statusBody = { code: 0, data: { email: 'test@example.com', leftDays: 342 } };
 const pointsBody = { code: 0, points: '276.0000000000000000', plans: { plan100: { points: 100, days: 10 }, plan200: { points: 200, days: 30 }, plan500: { points: 500, days: 100 } } };
@@ -28,14 +30,14 @@ async function runScript(options = {}) {
   let finish;
   const complete = new Promise(resolve => { finish = resolve; });
   const respond = (method, request, callback) => {
-    requests.push({ method, ...request });
+    requests.push({ method, ...request, headers: { ...request.headers } });
     const isCheckin = request.url.endsWith('/api/user/checkin');
     const isPoints = request.url.endsWith('/api/user/points');
-    const reply = options.reply ? options.reply({ method, request, isCheckin, isPoints }) : {
+    const reply = options.reply ? options.reply({ method, request, isCheckin, isPoints, values }) : {
       status: 200,
       body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
     };
-    queueMicrotask(() => callback(reply.error || null, { status: reply.status, headers: {} },
+    queueMicrotask(() => callback(reply.error || null, { status: reply.status, headers: reply.headers || {} },
       typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body)));
   };
   const context = {
@@ -269,6 +271,7 @@ test('the Surge module validates status responses on the supported API hosts and
   const capture = module.split('\n').find(line => line.startsWith('GLaDOS_Capture'));
   assert.match(capture, /type=http-response(?:,|$)/);
   assert.match(capture, /requires-body=(?:true|1)(?:,|$)/);
+  assert.match(capture, /full-header-mode=(?:true|1)(?:,|$)/);
   const pattern = new RegExp(capture.match(/pattern=([^,]+)/)[1]);
   for (const host of ['glados.network', 'glados.cloud', 'glados.one']) {
     assert.equal(pattern.test(`https://${host}/api/user/status`), true, host);
@@ -472,4 +475,258 @@ test('browsing anonymously, logging in, refreshing and logging out produces one 
   assert.equal(loggedOut.notifications.length, 0);
   assert.equal(loggedOut.writes.length, 0);
   assert.equal([anonymous, loggedIn, refreshed, loggedOut].reduce((total, result) => total + result.requests.length, 0), 0);
+});
+
+test('capture saves the response session rather than the cookie sent before rotation', async () => {
+  for (const headers of [
+    rotatedHeaders,
+    { 'sEt-CoOkIe': rotatedHeaders['Set-Cookie'].join(', ') },
+    rotatedHeaders['Set-Cookie'].map(value => ({ field: 'set-cookie', value })),
+  ]) {
+    const result = await runScript({
+      store: storedSession,
+      request: { url: 'https://glados.network/api/user/status', headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } },
+      response: { status: 200, headers, body: statusBody },
+    });
+    assert.equal(result.values.GLADOS_COOKIE, ROTATED_COOKIE);
+    assert.equal(result.values.GLADOS_USER_AGENT, MAC_UA);
+    assert.match(result.text, /获取成功/);
+    assert.equal(result.requests.length, 0);
+  }
+});
+
+test('capture handles Expires commas and Max-Age precedence without saving cookie attributes', async () => {
+  const result = await runScript({
+    request: { url: 'https://glados.network/api/user/status', headers: { Cookie: `${COOKIE}; theme=dark`, 'User-Agent': MAC_UA } },
+    response: { status: 200, body: statusBody, headers: { 'Set-Cookie':
+      'gld:sess=rotated-session==; Domain=.glados.network; Path=/; Expires=Wed, 01 Jan 2099 00:00:00 GMT, gld:sess.sig=rotated-signature; Path=/; Max-Age=3600; Expires=Thu, 01 Jan 1970 00:00:00 GMT' } },
+  });
+  assert.equal(result.values.GLADOS_COOKIE, `${ROTATED_COOKIE}; theme=dark`);
+});
+
+test('response cookies outside the API scope leave the captured session unchanged', async () => {
+  const result = await runScript({
+    store: storedSession,
+    request: { url: 'https://glados.network/api/user/status', headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } },
+    response: { status: 200, body: statusBody, headers: { 'Set-Cookie': [
+      'gld:sess=wrong-domain; Domain=glados.cloud; Path=/',
+      'gld:sess=wrong-path; Path=/console',
+      'gld:sess.sig=status-only; Path=/api/user/status',
+      'tracking=unrelated; Path=/',
+    ] } },
+  });
+  assert.deepEqual(result.values, storedSession);
+  assert.equal(result.writes.length, 0);
+});
+
+test('an unauthenticated response cannot replace the stored session with Set-Cookie', async () => {
+  const result = await runScript({
+    store: storedSession,
+    request: { url: 'https://glados.network/api/user/status', headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } },
+    response: { status: 200, headers: rotatedHeaders, body: unauthenticatedStatusBody },
+  });
+  assert.deepEqual(result.values, storedSession);
+  assert.equal(result.writes.length, 0);
+  assert.equal(result.notifications.length, 0);
+});
+
+test('capture rejects a completely cleared or partially malformed response session', async () => {
+  for (const headers of [
+    { 'Set-Cookie': ['gld:sess=; Path=/; Max-Age=0', 'gld:sess.sig=; Path=/; Max-Age=0'] },
+    { 'Set-Cookie': ['gld:sess=invalid\r\nvalue; Path=/', 'gld:sess.sig=new-signature; Path=/'] },
+  ]) {
+    const result = await runScript({
+      store: storedSession,
+      request: { url: 'https://glados.network/api/user/status', headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } },
+      response: { status: 200, headers, body: statusBody },
+    });
+    assert.deepEqual(result.values, storedSession);
+    assert.equal(result.writes.length, 0);
+    assert.match(result.text, /获取失败/);
+    assert.doesNotMatch(result.text, /获取成功/);
+  }
+});
+
+test('a cleared or invalid response session never produces capture success', async () => {
+  for (const cookie of [
+    'gld:sess=; Path=/',
+    'gld:sess=deleted; Path=/; Max-Age=0',
+    'gld:sess.sig=deleted; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+    'gld:sess=invalid\r\nvalue; Path=/',
+  ]) {
+    const result = await runScript({
+      store: storedSession,
+      request: { url: 'https://glados.network/api/user/status', headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } },
+      response: { status: 200, headers: { 'Set-Cookie': cookie }, body: statusBody },
+    });
+    assert.deepEqual(result.values, storedSession);
+    assert.equal(result.writes.length, 0);
+    assert.doesNotMatch(result.text, /获取成功/);
+    assert.match(result.text, /获取失败/);
+  }
+});
+
+test('cron uses each rotated session in the next request and preserves the final rotation for tomorrow', async () => {
+  const statusCookie = 'gld:sess=status-session; gld:sess.sig=status-signature';
+  const finalCookie = 'gld:sess=points-session; gld:sess.sig=points-signature';
+  const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints, values }) => {
+    if (isPoints) assert.equal(values.GLADOS_COOKIE, statusCookie, 'the verified session must be saved before points are queried');
+    return {
+      status: 200,
+      headers: isCheckin ? rotatedHeaders : { 'Set-Cookie': [
+        `gld:sess=${isPoints ? 'points' : 'status'}-session; Path=/`,
+        `gld:sess.sig=${isPoints ? 'points' : 'status'}-signature; Path=/`,
+      ] },
+      body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
+    };
+  } });
+  assert.deepEqual(result.requests.map(request => request.headers.Cookie), [COOKIE, ROTATED_COOKIE, statusCookie]);
+  assert.equal(result.values.GLADOS_COOKIE, finalCookie);
+  assert.match(result.text, /成功 1，重复 0，失败 0/);
+  const tomorrow = await runScript({ store: result.values });
+  assert.equal(tomorrow.requests[0].headers.Cookie, finalCookie);
+});
+
+test('cron isolates its cookie jar from automatic cookies and redirects', async () => {
+  const result = await runScript({ store: storedSession });
+  for (const request of result.requests) {
+    assert.equal(request['auto-cookie'], false);
+    assert.equal(request['auto-redirect'], false);
+    assert.equal(request['full-header-mode'], true);
+  }
+});
+
+test('cron updates indexed and bulk cookies in their own slot without changing other accounts', async () => {
+  for (const store of [
+    { ...storedSession, GLADOS_COOKIE_1: COOKIE, GLADOS_USER_AGENT_1: MAC_UA, GLADOS_COOKIE_2: 'second-account-cookie', GLADOS_USER_AGENT_2: WINDOWS_UA },
+    { ...storedSession, GLADOS_EMAILS: 'test@example.com,second@example.com', GLADOS_COOKIES: `${COOKIE},second-account-cookie`, GLADOS_USER_AGENT_1: MAC_UA, GLADOS_USER_AGENT_2: WINDOWS_UA },
+  ]) {
+    const result = await runScript({ store, reply: ({ request, isCheckin, isPoints }) => ({
+      status: 200,
+      headers: isCheckin && request.headers.Cookie === COOKIE ? rotatedHeaders : {},
+      body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
+    }) });
+    assert.equal(result.values.GLADOS_COOKIE, COOKIE, 'automatic single-account capture is a separate slot');
+    if (store.GLADOS_COOKIES) assert.equal(result.values.GLADOS_COOKIES, `${ROTATED_COOKIE},second-account-cookie`);
+    else {
+      assert.equal(result.values.GLADOS_COOKIE_1, ROTATED_COOKIE);
+      assert.equal(result.values.GLADOS_COOKIE_2, 'second-account-cookie');
+    }
+    assert.equal(result.requests[1].headers.Cookie, ROTATED_COOKIE);
+    assert.deepEqual(result.requests.slice(3).map(request => request.headers.Cookie), Array(3).fill('second-account-cookie'));
+    assert.match(result.text, /成功 2，重复 0，失败 0/);
+  }
+});
+
+test('cron keeps a verified rotation when the later points request fails', async () => {
+  const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => isPoints
+    ? { error: 'Request timed out' }
+    : { status: 200, headers: isCheckin ? rotatedHeaders : {}, body: isCheckin ? successBody : statusBody } });
+  assert.equal(result.values.GLADOS_COOKIE, ROTATED_COOKIE);
+  assert.match(result.text, /成功 1，重复 0，失败 0/);
+  assert.match(result.text, /积分查询失败/);
+});
+
+test('an unverified rotated session is not persisted when status rejects the request', async () => {
+  const result = await runScript({ store: storedSession, reply: ({ isCheckin }) => ({
+    status: 200, headers: isCheckin ? rotatedHeaders : {}, body: isCheckin ? successBody : unauthenticatedStatusBody,
+  }) });
+  assert.deepEqual(result.values, storedSession);
+  assert.equal(result.writes.length, 0);
+  assert.match(result.text, /失败 1/);
+});
+
+test('a cookie persistence failure stays visible and stops before further requests', async () => {
+  const result = await runScript({ store: storedSession, failWriteKey: 'GLADOS_COOKIE', reply: ({ isCheckin, isPoints }) => ({
+    status: 200, headers: isCheckin ? rotatedHeaders : {}, body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
+  }) });
+  assert.deepEqual(result.values, storedSession);
+  assert.match(result.text, /Cookie.*保存失败/);
+  assert.match(result.text, /失败 1/);
+  assert.equal(result.requests.length, 2);
+});
+
+test('cron never overwrites a session captured while requests were in flight', async () => {
+  const newerCookie = 'gld:sess=new-browser-session; gld:sess.sig=new-browser-signature';
+  const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints, values }) => {
+    if (!isCheckin && !isPoints) values.GLADOS_COOKIE = newerCookie;
+    return { status: 200, headers: isCheckin ? rotatedHeaders : {}, body: isCheckin ? successBody : isPoints ? pointsBody : statusBody };
+  } });
+  assert.equal(result.values.GLADOS_COOKIE, newerCookie);
+  assert.equal(result.writes.length, 0);
+  assert.match(result.text, /会话已被更新/);
+});
+
+test('a concurrent capture keeps the new device and origin paired with its cookie', async () => {
+  for (const update of [
+    { GLADOS_USER_AGENT: WINDOWS_UA },
+    { GLADOS_API_BASE: 'https://glados.cloud' },
+    { GLADOS_COOKIE: ROTATED_COOKIE, GLADOS_USER_AGENT: WINDOWS_UA },
+  ]) {
+    const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints, values }) => {
+      if (!isCheckin && !isPoints) Object.assign(values, update);
+      return { status: 200, headers: isCheckin ? rotatedHeaders : {}, body: isCheckin ? successBody : isPoints ? pointsBody : statusBody };
+    } });
+    assert.deepEqual(result.values, { ...storedSession, ...update });
+    assert.equal(result.writes.length, 0);
+    assert.match(result.text, /会话已被更新/);
+  }
+});
+
+test('cleared session cookies stop cron without retrying checkin or destroying stored credentials', async () => {
+  for (const name of ['gld:sess', 'gld:sess.sig']) {
+    const result = await runScript({ store: storedSession, reply: () => ({
+      status: 200, headers: { 'Set-Cookie': `${name}=; Path=/; Max-Age=0` }, body: successBody,
+    }) });
+    assert.deepEqual(result.values, storedSession);
+    assert.equal(result.requests.length, 1);
+    assert.match(result.text, /会话.*清除/);
+    assert.match(result.text, /重新登录并抓取/);
+    assert.match(result.text, /失败 1/);
+  }
+});
+
+test('authentication rejection explicitly asks for login at every API stage', async () => {
+  for (const endpoint of ['checkin', 'status', 'points']) {
+    const result = await runScript({ store: storedSession, reply: ({ request, isCheckin, isPoints }) => {
+      const target = request.url.endsWith(`/api/user/${endpoint}`);
+      return { status: 200, body: target ? unauthenticatedStatusBody : isCheckin ? successBody : isPoints ? pointsBody : statusBody };
+    } });
+    assert.match(result.text, /登录会话已失效/);
+    assert.match(result.text, /重新登录并抓取/);
+    assert.match(result.text, endpoint === 'points' ? /积分查询失败/ : /失败 1/);
+    assert.deepEqual(result.values, storedSession);
+  }
+});
+
+test('a fully cleared or malformed response cookie stops cron before another request', async () => {
+  for (const cookies of [
+    ['gld:sess=; Path=/; Max-Age=0', 'gld:sess.sig=; Path=/; Max-Age=0'],
+    ['gld:sess=invalid\r\nvalue; Path=/', 'gld:sess.sig=new-signature; Path=/'],
+  ]) {
+    const result = await runScript({ store: storedSession, reply: ({ isCheckin, isPoints }) => ({
+      status: 200, headers: isCheckin ? { 'Set-Cookie': cookies } : {}, body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
+    }) });
+    assert.deepEqual(result.values, storedSession);
+    assert.equal(result.requests.length, 1);
+    assert.match(result.text, /失败 1/);
+    assert.match(result.text, /会话.*(?:清除|无效)|无效.*会话/);
+  }
+});
+
+test('bulk configuration retains original cookie slots when empty CSV items are present', async () => {
+  const store = {
+    ...storedSession, GLADOS_EMAILS: 'one@example.com,,two@example.com', GLADOS_COOKIES: `,${COOKIE},,second-account-cookie,`,
+    GLADOS_USER_AGENT_1: MAC_UA, GLADOS_USER_AGENT_2: WINDOWS_UA,
+  };
+  const unchanged = await runScript({ store });
+  assert.deepEqual(unchanged.values, store);
+  assert.match(unchanged.text, /成功 2，重复 0，失败 0/);
+  const rotated = await runScript({ store, reply: ({ request, isCheckin, isPoints }) => ({
+    status: 200,
+    headers: isCheckin && request.headers.Cookie === COOKIE ? rotatedHeaders : {},
+    body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
+  }) });
+  assert.equal(rotated.values.GLADOS_COOKIES, `,${ROTATED_COOKIE},,second-account-cookie,`);
+  assert.match(rotated.text, /成功 2，重复 0，失败 0/);
 });
