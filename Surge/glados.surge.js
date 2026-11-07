@@ -8,7 +8,9 @@
 
 const DEFAULT_API_BASES = ["https://glados.network"];
 const SESSION_COOKIE_NAMES = ["gld:sess", "gld:sess.sig"];
-const API_PATHS = ["/api/user/checkin", "/api/user/status", "/api/user/points"];
+const API_PATHS = ["/api/user/checkin/challenge", "/api/user/checkin", "/api/user/status", "/api/user/points"];
+const CHECKIN_CHALLENGE_DELAY = 2700;
+const CHECKIN_PROOF_SUFFIX = ".glados-observe-v1";
 
 const Store = {
   read: (k) => $persistentStore.read(k),
@@ -63,6 +65,91 @@ function http(method, options) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function sha256(text) {
+  // Surge 默认 JSC 引擎没有 Web Crypto；本地按 SHA-256 计算官网要求的 UTF-8 proof。
+  const bytes = [];
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    if (code < 0x80) bytes.push(code);
+    else if (code < 0x800) bytes.push(0xc0 | (code >>> 6), 0x80 | (code & 63));
+    else if (code < 0x10000) bytes.push(0xe0 | (code >>> 12), 0x80 | ((code >>> 6) & 63), 0x80 | (code & 63));
+    else bytes.push(0xf0 | (code >>> 18), 0x80 | ((code >>> 12) & 63), 0x80 | ((code >>> 6) & 63), 0x80 | (code & 63));
+  }
+  const bitLength = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  for (const word of [Math.floor(bitLength / 0x100000000), bitLength >>> 0]) {
+    for (let shift = 24; shift >= 0; shift -= 8) bytes.push((word >>> shift) & 255);
+  }
+  const hash = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  for (let offset = 0; offset < bytes.length; offset += 64) sha256Block(hash, bytes, offset);
+  return hash.map(word => (word >>> 0).toString(16).padStart(8, "0")).join("");
+}
+
+function sha256Block(hash, bytes, offset) {
+  const constants = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ];
+  const rotate = (value, bits) => (value >>> bits) | (value << (32 - bits));
+  const words = [];
+  for (let i = 0; i < 16; i++) {
+    const at = offset + i * 4;
+    words[i] = (bytes[at] << 24) | (bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3];
+  }
+  for (let i = 16; i < 64; i++) {
+    const x = words[i - 15], y = words[i - 2];
+    const s0 = rotate(x, 7) ^ rotate(x, 18) ^ (x >>> 3);
+    const s1 = rotate(y, 17) ^ rotate(y, 19) ^ (y >>> 10);
+    words[i] = (words[i - 16] + s0 + words[i - 7] + s1) >>> 0;
+  }
+  let [a, b, c, d, e, f, g, h] = hash;
+  for (let i = 0; i < 64; i++) {
+    const s1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
+    const temp1 = (h + s1 + ((e & f) ^ (~e & g)) + constants[i] + words[i]) >>> 0;
+    const s0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
+    const temp2 = (s0 + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+    [a, b, c, d, e, f, g, h] = [(temp1 + temp2) >>> 0, a, b, c, (d + temp1) >>> 0, e, f, g];
+  }
+  [a, b, c, d, e, f, g, h].forEach((word, i) => { hash[i] = (hash[i] + word) >>> 0; });
+}
+
+function parseChallenge(response) {
+  if (String(response.status) !== "200") throw new Error(`签到验证 HTTP ${response.status}，未提交签到`);
+  let result;
+  try { result = JSON.parse(response.body); }
+  catch (error) { throw new Error("签到验证 JSON 解析失败，未提交签到"); }
+  if (isSessionRejected(result)) throw new Error(sessionExpiredMessage("签到验证", ""));
+  if (result?.code !== 0 || typeof result.nonce !== "string" || !result.nonce.trim() ||
+      typeof result.ttl !== "number" || !Number.isFinite(result.ttl) || result.ttl <= CHECKIN_CHALLENGE_DELAY) {
+    throw new Error("签到验证缺失或无效，未提交签到");
+  }
+  return result;
+}
+
+async function prepareCheckin(apiBase, hdrs) {
+  // 官网协议：GET challenge，等待至少 2.5 秒，再同域提交 nonce 和 SHA-256 proof。
+  const startedAt = Date.now();
+  let response;
+  try { response = await http("get", { url: `${apiBase}/api/user/checkin/challenge`, headers: hdrs }); }
+  catch (error) { throw new Error("签到验证网络请求失败，未提交签到"); }
+  const challenge = parseChallenge(response);
+  const nextHeaders = headersAfterResponse(hdrs, response, apiBase);
+  requireSessionCookie(nextHeaders.Cookie, "签到验证");
+  const proof = sha256(challenge.nonce + CHECKIN_PROOF_SUFFIX);
+  await sleep(CHECKIN_CHALLENGE_DELAY);
+  // 从请求开始计时，保守计入网络耗时和设备休眠，避免发送过期验证。
+  const elapsed = Date.now() - startedAt;
+  if (elapsed < CHECKIN_CHALLENGE_DELAY || elapsed >= challenge.ttl) throw new Error("签到验证已过期，未提交签到");
+  return { headers: nextHeaders, body: JSON.stringify({ token: hostFromBase(apiBase), nonce: challenge.nonce, proof }) };
 }
 
 function nowStr() {
@@ -397,8 +484,9 @@ async function signOnce(account) {
     const apiBase = String(base || "").replace(/\/+$/, "");
     try {
       let hdrs = headers(cookie, apiBase, userAgent);
-      const token = hostFromBase(apiBase);
-      const r1 = await http("post", { url: `${apiBase}/api/user/checkin`, body: JSON.stringify({ token }), headers: hdrs });
+      const prepared = await prepareCheckin(apiBase, hdrs);
+      hdrs = prepared.headers;
+      const r1 = await http("post", { url: `${apiBase}/api/user/checkin`, body: prepared.body, headers: hdrs });
       hdrs = headersAfterResponse(hdrs, r1, apiBase);
       requireSessionCookie(hdrs.Cookie, "Checkin");
       const j1 = parseResponse(r1, "Checkin");

@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { createHash } = require('node:crypto');
 
 const scriptPath = process.env.GLADOS_SCRIPT || path.resolve(__dirname, '../Surge/glados.surge.js');
 const modulePath = process.env.GLADOS_MODULE || path.resolve(__dirname, '../Surge/GLaDOS自动签到.sgmodule');
@@ -19,21 +20,29 @@ const unauthenticatedStatusBody = { code: -2, message: '没有权限' };
 const successBody = { code: 0, points: 10, message: 'Checkin! Got 10 Points', streak: 1, list: [] };
 const repeatBody = { code: 1, points: 0, message: "Today's observation logged. Return tomorrow for more points.", streak: 1, list: [] };
 const mismatchBody = { code: 4, reason: 'device-mismatch', points: 0, loginDevice: 'macOS', currentDevice: 'Windows', message: 'Automated check-in detected. Please sign in again to continue.', list: [] };
+const challengeBody = { code: 0, nonce: '0123456789abcdef0123456789abcdef', ttl: 300000 };
 
 async function runScript(options = {}) {
   const values = { ...options.store };
   const requests = [];
   const writes = [];
   const notifications = [];
+  const sleeps = [];
+  let clock = Date.now();
+  class ScriptDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [clock])); }
+    static now() { return clock; }
+  }
   let doneCalls = 0;
   const doneResults = [];
   let finish;
   const complete = new Promise(resolve => { finish = resolve; });
   const respond = (method, request, callback) => {
-    requests.push({ method, ...request, headers: { ...request.headers } });
+    requests.push({ method, ...request, at: clock, headers: { ...request.headers } });
+    const isChallenge = request.url.endsWith('/api/user/checkin/challenge');
     const isCheckin = request.url.endsWith('/api/user/checkin');
     const isPoints = request.url.endsWith('/api/user/points');
-    const reply = options.reply ? options.reply({ method, request, isCheckin, isPoints, values }) : {
+    const reply = isChallenge ? (options.challengeReply ? options.challengeReply({ request, values, advanceTime: ms => { clock += ms; } }) : { status: 200, body: challengeBody }) : options.reply ? options.reply({ method, request, isCheckin, isPoints, values }) : {
       status: 200,
       body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
     };
@@ -45,7 +54,8 @@ async function runScript(options = {}) {
     $httpClient: { get: (request, cb) => respond('GET', request, cb), post: (request, cb) => respond('POST', request, cb) },
     $notification: { post: (...args) => notifications.push(args) },
     $done: result => { doneCalls++; doneResults.push(result); finish(); },
-    setTimeout: callback => { queueMicrotask(callback); return 0; },
+    Date: ScriptDate,
+    setTimeout: (callback, ms = 0) => { sleeps.push(ms); queueMicrotask(() => { clock += options.sleepAdvance ? options.sleepAdvance(ms) : ms; callback(); }); return 0; },
     console,
   };
   if (options.request) {
@@ -56,8 +66,87 @@ async function runScript(options = {}) {
   vm.runInNewContext(source, context, { filename: scriptPath, timeout: 1000 });
   await complete;
   assert.equal(doneCalls, 1, '$done must be called exactly once');
-  return { values, requests, writes, notifications, doneResults, text: notifications.flat().join('\n') };
+  return { values, requests, writes, notifications, doneResults, sleeps, text: notifications.flat().join('\n') };
 }
+
+test('challenge flow sends a fresh proof after the observation delay on the same origin', async () => {
+  const result = await runScript({ store: { ...storedSession, GLADOS_API_BASE: 'https://glados.cloud' } });
+  assert.deepEqual(result.requests.map(r => [r.method, r.url]), [
+    ['GET', 'https://glados.cloud/api/user/checkin/challenge'],
+    ['POST', 'https://glados.cloud/api/user/checkin'],
+    ['GET', 'https://glados.cloud/api/user/status'],
+    ['GET', 'https://glados.cloud/api/user/points'],
+  ]);
+  const payload = JSON.parse(result.requests[1].body);
+  assert.deepEqual(payload, { token: 'glados.cloud', nonce: challengeBody.nonce,
+    proof: createHash('sha256').update(`${challengeBody.nonce}.glados-observe-v1`).digest('hex') });
+  assert.ok(result.requests[1].at - result.requests[0].at >= 2700);
+  assert.match(result.text, /获得 10 积分/);
+  assert.ok(!result.text.includes(payload.nonce) && !result.text.includes(payload.proof));
+});
+
+test('challenge proof matches SHA-256 across UTF-8 and block padding boundaries without Web Crypto', async () => {
+  for (const nonce of ['a', 'x'.repeat(37), 'x'.repeat(38), 'x'.repeat(39), 'x'.repeat(46), 'x'.repeat(47), 'x'.repeat(48), 'x'.repeat(120), '测试-🔑']) {
+    const result = await runScript({ store: storedSession, challengeReply: () => ({ status: 200, body: { ...challengeBody, nonce } }) });
+    const request = result.requests.find(r => r.method === 'POST');
+    assert.equal(JSON.parse(request.body).proof, createHash('sha256').update(`${nonce}.glados-observe-v1`).digest('hex'), nonce);
+  }
+});
+
+test('challenge rejection or malformed verification stops without a legacy checkin or exposed payload', async () => {
+  const failures = [
+    { status: 200, body: null }, { status: 200, body: {} },
+    ...[{ code: 1 }, { code: -2 }, { nonce: '' }, { nonce: '   ' }, { nonce: 123 }, { ttl: 0 }, { ttl: 2700 }, { ttl: '300000' }, { ttl: null }]
+      .map(change => ({ status: 200, body: { ...challengeBody, ...change } })),
+    { status: 200, body: `invalid-json ${challengeBody.nonce}` },
+    { status: 403, body: JSON.stringify(challengeBody) },
+    { error: 'Request timed out' },
+  ];
+  for (const failure of failures) {
+    const result = await runScript({ store: storedSession, challengeReply: () => failure });
+    assert.equal(result.requests.length, 1);
+    assert.equal(result.requests[0].method, 'GET');
+    assert.match(result.text, /失败 1/);
+    assert.match(result.text, /验证|Challenge/);
+    assert.ok(!result.text.includes(challengeBody.nonce));
+    assert.deepEqual(result.values, storedSession);
+  }
+});
+
+test('challenge expiry during network delivery or device suspension prevents submission', async () => {
+  for (const timing of [{ network: 5000, extraSleep: 0 }, { network: 0, extraSleep: 5000 }]) {
+    const result = await runScript({ store: storedSession,
+      challengeReply: ({ advanceTime }) => { advanceTime(timing.network); return { status: 200, body: { ...challengeBody, ttl: 7000 } }; },
+      sleepAdvance: ms => ms + (ms >= 2500 ? timing.extraSleep : 0),
+    });
+    assert.equal(result.requests.length, 1);
+    assert.match(result.text, /验证.*过期/);
+    assert.match(result.text, /失败 1/);
+  }
+});
+
+test('challenge cookie rotation is used for checkin and persisted after authenticated status', async () => {
+  const result = await runScript({ store: storedSession, challengeReply: () => ({ status: 200, headers: rotatedHeaders, body: challengeBody }) });
+  assert.deepEqual(result.requests.map(r => r.headers.Cookie), [COOKIE, ROTATED_COOKIE, ROTATED_COOKIE, ROTATED_COOKIE]);
+  assert.equal(result.values.GLADOS_COOKIE, ROTATED_COOKIE);
+  assert.match(result.text, /成功 1/);
+});
+
+test('challenge nonces are isolated per account and never persisted for later runs', async () => {
+  let issued = 0;
+  const store = { ...storedSession, GLADOS_COOKIE_1: COOKIE, GLADOS_USER_AGENT_1: MAC_UA, GLADOS_COOKIE_2: 'second-cookie', GLADOS_USER_AGENT_2: WINDOWS_UA };
+  const challengeReply = () => ({ status: 200, body: { ...challengeBody, nonce: `fresh-${++issued}` } });
+  const first = await runScript({ store, challengeReply });
+  const next = await runScript({ store: first.values, challengeReply });
+  assert.deepEqual([...first.requests, ...next.requests].filter(r => r.method === 'POST').map(r => JSON.parse(r.body).nonce), ['fresh-1', 'fresh-2', 'fresh-3', 'fresh-4']);
+  assert.deepEqual(next.values, store);
+});
+
+test('challenge checkin transport failure never retries or reuses the nonce', async () => {
+  const result = await runScript({ store: storedSession, reply: () => ({ error: 'Request timed out' }) });
+  assert.deepEqual(result.requests.map(r => r.method), ['GET', 'POST']);
+  assert.match(result.text, /失败 1/);
+});
 
 test('capture preserves the actual login User-Agent alongside the cookie', async () => {
   const result = await runScript({ request: { url: 'https://glados.network/api/user/status', headers: { Cookie: COOKIE, 'User-Agent': MAC_UA } } });
@@ -83,9 +172,9 @@ test('an incomplete capture keeps the previous cookie and device paired', async 
 
 test('cron reuses the captured device on the checkin, status and points calls', async () => {
   const result = await runScript({ store: storedSession });
-  assert.equal(result.requests.length, 3);
-  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, MAC_UA]);
-  assert.deepEqual(JSON.parse(result.requests[0].body), { token: 'glados.network' });
+  assert.equal(result.requests.length, 4);
+  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), Array(4).fill(MAC_UA));
+  assert.equal(JSON.parse(result.requests[1].body).token, 'glados.network');
   assert.match(result.text, /成功 1，重复 0，失败 0/);
   assert.match(result.text, /获得 10 积分/);
 });
@@ -98,6 +187,7 @@ test('points notification uses the live balance and plans without redeeming anyt
   assert.match(result.text, /500 分 → 100 天：还差 224 分/);
   assert.match(result.text, /✅ test@example\.com\n签到成功，获得 10 积分\n剩余时长: 342 天/);
   assert.deepEqual(result.requests.map(r => [r.method, r.url]), [
+    ['GET', 'https://glados.network/api/user/checkin/challenge'],
     ['POST', 'https://glados.network/api/user/checkin'],
     ['GET', 'https://glados.network/api/user/status'],
     ['GET', 'https://glados.network/api/user/points'],
@@ -168,7 +258,7 @@ test('points notification reports query failures without changing a confirmed ch
     assert.match(result.text, /成功 1，重复 0，失败 0/);
     assert.match(result.text, /积分查询失败/);
     assert.doesNotMatch(result.text, /可兑换|还差 \d+ 分|当前积分: 0/);
-    assert.equal(result.requests.length, 3);
+    assert.equal(result.requests.length, 4);
   }
 });
 
@@ -199,7 +289,7 @@ test('points notification keeps each account balance and redemption progress sep
   }) });
   const body = result.notifications[0][2];
   assert.match(body, /✅ one@example\.com[\s\S]*当前积分: 276[\s\S]*还差 224 分\n\n✅ two@example\.com[\s\S]*当前积分: 50[\s\S]*100 分 → 10 天：还差 50 分[\s\S]*500 分 → 100 天：还差 450 分/);
-  assert.equal(result.requests.length, 6);
+  assert.equal(result.requests.length, 8);
   assert.deepEqual(result.requests.filter(r => r.url.endsWith('/points')).map(r => r.headers['User-Agent']), [MAC_UA, WINDOWS_UA]);
 });
 
@@ -212,7 +302,7 @@ test('a missing device capture fails explicitly without sending a request', asyn
 
 test('the default API origin is the currently used network domain', async () => {
   const result = await runScript({ store: { GLADOS_COOKIE: COOKIE, GLADOS_USER_AGENT: MAC_UA } });
-  assert.equal(result.requests[0].url, 'https://glados.network/api/user/checkin');
+  assert.equal(result.requests[0].url, 'https://glados.network/api/user/checkin/challenge');
 });
 
 test('device-mismatch with zero points is a failure rather than a success', async () => {
@@ -256,14 +346,14 @@ test('non-JSON and HTTP errors remain visible', async () => {
 test('indexed accounts retain their individual login devices', async () => {
   const store = { GLADOS_API_BASE: 'https://glados.network', GLADOS_COOKIE_1: COOKIE, GLADOS_COOKIE_2: 'test-second-cookie', GLADOS_USER_AGENT_1: MAC_UA, GLADOS_USER_AGENT_2: WINDOWS_UA };
   const result = await runScript({ store });
-  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, MAC_UA, WINDOWS_UA, WINDOWS_UA, WINDOWS_UA]);
+  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [...Array(4).fill(MAC_UA), ...Array(4).fill(WINDOWS_UA)]);
   assert.match(result.text, /成功 2，重复 0，失败 0/);
 });
 
 test('bulk accounts can specify each device with the same indexed keys', async () => {
   const store = { GLADOS_API_BASE: 'https://glados.network', GLADOS_EMAILS: 'one@example.com,two@example.com', GLADOS_COOKIES: `${COOKIE},test-second-cookie`, GLADOS_USER_AGENT_1: MAC_UA, GLADOS_USER_AGENT_2: WINDOWS_UA };
   const result = await runScript({ store });
-  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [MAC_UA, MAC_UA, MAC_UA, WINDOWS_UA, WINDOWS_UA, WINDOWS_UA]);
+  assert.deepEqual(result.requests.map(r => r.headers['User-Agent']), [...Array(4).fill(MAC_UA), ...Array(4).fill(WINDOWS_UA)]);
 });
 
 test('the Surge module validates status responses on the supported API hosts and appends MITM hosts', () => {
@@ -298,10 +388,10 @@ test('the module timeout covers twenty indexed accounts including their request 
     Object.assign(store, { [`GLADOS_EMAIL_${index}`]: `test-${index}@example.com`, [`GLADOS_COOKIE_${index}`]: COOKIE, [`GLADOS_USER_AGENT_${index}`]: MAC_UA });
   }
   const result = await runScript({ store });
-  assert.equal(result.requests.length, 60);
+  assert.equal(result.requests.length, 80);
   assert.match(result.text, /成功 20，重复 0，失败 0/);
   const requestSeconds = result.requests.reduce((sum, request) => sum + (request.timeout ?? 5), 0);
-  const pacingSeconds = 20 * 2;
+  const pacingSeconds = 20 * (2 + 2.7);
   const module = fs.readFileSync(modulePath, 'utf8');
   const cron = module.split('\n').find(line => line.startsWith('GLaDOS_Checkin'));
   const timeoutSeconds = Number(cron.match(/timeout=(\d+)(?:,|$)/)?.[1]);
@@ -389,7 +479,7 @@ test('legacy Telegram settings never send a push or change the local checkin res
   for (const settings of [{ TG_BOT_TOKEN: '123:synthetic-token', TG_CHAT_ID: 'synthetic-chat' }, { TG_BOT_TOKEN: '123:synthetic-token' }, { TG_CHAT_ID: 'synthetic-chat' }]) {
     const store = { ...storedSession, ...settings };
     const result = await runScript({ store });
-    assert.deepEqual(result.requests.map(request => request.url), ['https://glados.network/api/user/checkin', 'https://glados.network/api/user/status', 'https://glados.network/api/user/points']);
+    assert.deepEqual(result.requests.map(request => request.url), ['https://glados.network/api/user/checkin/challenge', 'https://glados.network/api/user/checkin', 'https://glados.network/api/user/status', 'https://glados.network/api/user/points']);
     assert.match(result.text, /成功 1，重复 0，失败 0/);
     assert.doesNotMatch(result.text, /Telegram|synthetic-token/);
     assert.equal(result.notifications.length, 1);
@@ -580,7 +670,7 @@ test('cron uses each rotated session in the next request and preserves the final
       body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
     };
   } });
-  assert.deepEqual(result.requests.map(request => request.headers.Cookie), [COOKIE, ROTATED_COOKIE, statusCookie]);
+  assert.deepEqual(result.requests.map(request => request.headers.Cookie), [COOKIE, COOKIE, ROTATED_COOKIE, statusCookie]);
   assert.equal(result.values.GLADOS_COOKIE, finalCookie);
   assert.match(result.text, /成功 1，重复 0，失败 0/);
   const tomorrow = await runScript({ store: result.values });
@@ -612,8 +702,8 @@ test('cron updates indexed and bulk cookies in their own slot without changing o
       assert.equal(result.values.GLADOS_COOKIE_1, ROTATED_COOKIE);
       assert.equal(result.values.GLADOS_COOKIE_2, 'second-account-cookie');
     }
-    assert.equal(result.requests[1].headers.Cookie, ROTATED_COOKIE);
-    assert.deepEqual(result.requests.slice(3).map(request => request.headers.Cookie), Array(3).fill('second-account-cookie'));
+    assert.equal(result.requests[2].headers.Cookie, ROTATED_COOKIE);
+    assert.deepEqual(result.requests.slice(4).map(request => request.headers.Cookie), Array(4).fill('second-account-cookie'));
     assert.match(result.text, /成功 2，重复 0，失败 0/);
   }
 });
@@ -643,7 +733,7 @@ test('a cookie persistence failure stays visible and stops before further reques
   assert.deepEqual(result.values, storedSession);
   assert.match(result.text, /Cookie.*保存失败/);
   assert.match(result.text, /失败 1/);
-  assert.equal(result.requests.length, 2);
+  assert.equal(result.requests.length, 3);
 });
 
 test('cron never overwrites a session captured while requests were in flight', async () => {
@@ -679,7 +769,7 @@ test('cleared session cookies stop cron without retrying checkin or destroying s
       status: 200, headers: { 'Set-Cookie': `${name}=; Path=/; Max-Age=0` }, body: successBody,
     }) });
     assert.deepEqual(result.values, storedSession);
-    assert.equal(result.requests.length, 1);
+    assert.equal(result.requests.length, 2);
     assert.match(result.text, /会话.*清除/);
     assert.match(result.text, /重新登录并抓取/);
     assert.match(result.text, /失败 1/);
@@ -708,7 +798,7 @@ test('a fully cleared or malformed response cookie stops cron before another req
       status: 200, headers: isCheckin ? { 'Set-Cookie': cookies } : {}, body: isCheckin ? successBody : isPoints ? pointsBody : statusBody,
     }) });
     assert.deepEqual(result.values, storedSession);
-    assert.equal(result.requests.length, 1);
+    assert.equal(result.requests.length, 2);
     assert.match(result.text, /失败 1/);
     assert.match(result.text, /会话.*(?:清除|无效)|无效.*会话/);
   }
