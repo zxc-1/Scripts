@@ -71,7 +71,8 @@ function sha256(text) {
   // Surge 默认 JSC 引擎没有 Web Crypto；本地按 SHA-256 计算官网要求的 UTF-8 proof。
   const bytes = [];
   for (const char of text) {
-    const code = char.codePointAt(0);
+    const point = char.codePointAt(0);
+    const code = point >= 0xd800 && point <= 0xdfff ? 0xfffd : point;
     if (code < 0x80) bytes.push(code);
     else if (code < 0x800) bytes.push(0xc0 | (code >>> 6), 0x80 | (code & 63));
     else if (code < 0x10000) bytes.push(0xe0 | (code >>> 12), 0x80 | ((code >>> 6) & 63), 0x80 | (code & 63));

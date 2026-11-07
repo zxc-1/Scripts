@@ -86,7 +86,7 @@ test('challenge flow sends a fresh proof after the observation delay on the same
 });
 
 test('challenge proof matches SHA-256 across UTF-8 and block padding boundaries without Web Crypto', async () => {
-  for (const nonce of ['a', 'x'.repeat(37), 'x'.repeat(38), 'x'.repeat(39), 'x'.repeat(46), 'x'.repeat(47), 'x'.repeat(48), 'x'.repeat(120), '测试-🔑']) {
+  for (const nonce of ['a', 'x'.repeat(37), 'x'.repeat(38), 'x'.repeat(39), 'x'.repeat(46), 'x'.repeat(47), 'x'.repeat(48), 'x'.repeat(120), '测试-🔑', '\ud800', '\udfff']) {
     const result = await runScript({ store: storedSession, challengeReply: () => ({ status: 200, body: { ...challengeBody, nonce } }) });
     const request = result.requests.find(r => r.method === 'POST');
     assert.equal(JSON.parse(request.body).proof, createHash('sha256').update(`${nonce}.glados-observe-v1`).digest('hex'), nonce);
